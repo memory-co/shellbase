@@ -100,7 +100,8 @@ shellbase = **在任意 VM 上一条 `docker run` 拉起的 Web 工作台**，�
 - ttyd 以 `ttyd -i 127.0.0.1 -p 7681 -W /opt/shellbase/bin/attach.sh` 启动；
 - `attach.sh` 逻辑：`tmux new-session -A -s main -c /workspace`——存在则 attach，不存在则创建；
 - 前端**直接以 iframe 装载 ttyd 自带页面**（配合 3.6 的分割布局，终端就是一种可放进块里的应用），不自研终端渲染层；
-- 多终端：URL query 传 `?arg=<session>`，`attach.sh` 据此 attach 不同 tmux 会话——每个终端块一个会话；FastAPI 提供 `GET /api/terminals` 列出 tmux 会话供应用选择器展示。
+- 多终端：URL query 传 `?arg=<session>`，`attach.sh` 据此 attach 不同 tmux 会话——每个终端块一个会话；
+- **会话注册制**：终端块的 iframe 不直接指向 `/tty/`，而是指向 `/api/terminals/{id}/attach`，由 FastAPI 校验注册表后 302 跳转到 `/tty/?arg=<id>`；`attach.sh` 创建会话前也校验注册表，未注册的 session 名直接拒绝——杜绝拼 URL"无中生有"会话，后端因此掌握全部打开中的终端（详见 [backend.md](backend.md)）。
 
 选 tmux 而不是裸 pty 的理由：断线重连不丢现场、Agent 长任务不因刷新页面而中断、天然支持多会话，并且 Agent 的输出历史可以通过 `tmux capture-pane` 被 API 读取。
 
@@ -113,10 +114,15 @@ app/
 ├── main.py              # FastAPI 实例、路由挂载、启动钩子
 ├── auth.py              # /api/auth/login, /api/auth/verify (供 nginx auth_request)
 ├── files.py             # 文件管理
-├── terminals.py         # tmux 会话枚举/创建/关闭
-├── agent.py             # Agent 会话管理
+├── terminals.py         # 终端会话注册表 + 302 attach + Agent 会话（见 backend.md）
+├── layout.py            # 页面布局树的读写（见 backend.md）
+├── state.py             # 文件系统状态存储（原子写、对账、回收）
 └── system.py            # /api/system/info: CPU/内存/磁盘/版本
 ```
+
+后端是**全局状态的唯一权威**：终端注册表、页面布局、Agent 会话全部以文件系统持久化在
+`SHELLBASE_STATE_DIR`（默认 `/workspace/.shellbase/state`），用户换设备或容器重启后仍能恢复
+一模一样的页面。专项设计见 [backend.md](backend.md)。
 
 **文件 API**（根锚定在 `/workspace`，路径穿越一律 403）：
 
@@ -140,7 +146,7 @@ app/
 
 - 地址栏、前进/后退（维护面板自身的历史栈，`iframe.src` 切换）、刷新、新标签；
 - iframe 加 `sandbox` 属性按需放权，避免嵌入页影响宿主页面；
-- 前端记住最近打开的 URL 列表（localStorage），刷新后恢复。
+- 当前打开的 URL 作为块参数随布局树存到后端（见 backend.md），重新进入后原样恢复；最近访问列表可留在 localStorage 作为便利功能。
 
 主要用途与已知限制：
 
@@ -151,11 +157,12 @@ app/
 
 v1 的 Agent 模型是「**运行在 tmux 会话里的 CLI Agent 进程**」，平台负责拉起、观测、交互，不重新发明 Agent 运行时：
 
-- `POST /api/agent/sessions`：创建一个 tmux 会话并在其中启动指定 Agent 的命令
+- Agent 会话就是一条 `kind: agent` 的终端注册项（复用 backend.md 的注册/attach/回收机制）：
+  `POST /api/terminals {agent: "claude"}` 创建 tmux 会话并启动该 Agent 的命令
   （命令模板来自应用注册表：内置 `claude`、`codex` 等，可经 `SHELLBASE_APPS_EXTRA` 扩展，见 3.6）；
-- `GET /api/agent/sessions`：列出 Agent 会话及状态（running / idle / exited，通过 tmux pane 的存活 + 前台进程判断）；
-- `POST /api/agent/sessions/{id}/input`：向会话注入文本（`tmux send-keys`），用于程序化下发任务；
-- `GET /api/agent/sessions/{id}/output`：`tmux capture-pane` 抓取最近输出；
+- `GET /api/terminals`：列出会话及状态（running / idle / exited，通过 tmux pane 的存活 + 前台进程判断）；
+- `POST /api/terminals/{id}/input`：向会话注入文本（`tmux send-keys`），用于程序化下发任务；
+- `GET /api/terminals/{id}/output`：`tmux capture-pane` 抓取最近输出；
 - Agent 应用块（如 Claude Code、Codex）装载的就是该 tmux 会话的终端——因此"观察 Agent"和"接管操作"是同一个块，无需切换。
 
 Agent 与文件/浏览器的融合点：Agent 在终端里跑，工作目录就是 `/workspace`（与文件浏览器应用同源）；Agent 起的 web 服务（dev server 等），用户在旁边的浏览器块里输入地址即可预览——同屏分割布局让"Agent 改代码 → 看效果"零切换。
@@ -180,18 +187,18 @@ Agent 与文件/浏览器的融合点：Agent 在终端里跑，工作目录就�
 
 - 布局模型是**递归二叉分割树**：每个节点要么是横/纵分割（带比例），要么是叶子（一个块）；支持拖拽调整比例、任意块再分割、关闭合并；
 - 空白块显示**应用选择器**，选中后块内创建 iframe 指向该应用的 URL；
-- 布局树 + 每块的应用与参数持久化到 localStorage，刷新后原样恢复（终端块靠 tmux 恢复现场，天然无损）；
+- 布局树 + 每块的应用与参数**持久化在后端**（`GET/PUT /api/layout`，防抖全量覆盖，见 [backend.md](backend.md)）——换浏览器、换设备、容器重启后进入，都恢复出一模一样的页面（终端块靠 tmux 恢复现场，天然无损）；
 - 同源 iframe 自动携带认证 Cookie，各应用无需单独处理鉴权。
 
 **应用即 URL**：每个应用是一个独立可访问的页面，Shell 只负责把它装进 iframe。这让应用之间完全解耦，新增应用只是注册一条 URL。
 
 | 应用 | URL | 说明 |
 |------|-----|------|
-| 终端 | `/tty/?arg=<session>` | 直接装载 ttyd 自带页面，attach 指定 tmux 会话 |
+| 终端 | `/api/terminals/{id}/attach` | 先 `POST /api/terminals` 注册，iframe 经此 302 到 ttyd 页面（见 backend.md） |
 | 文件浏览器 | `/apps/files` | 文件树 + CodeMirror 6 编辑器 + 上传下载，对接文件 API，经 `/api/files/watch` 实时刷新 |
 | 浏览器 | `/apps/browser` | 地址栏 + 内层 iframe（见 3.4） |
-| Claude Code | `/tty/?arg=agent-claude-<n>` | Agent 类应用：先经 `/api/agent/sessions` 创建运行 `claude` 的 tmux 会话，再装载其终端 |
-| Codex | `/tty/?arg=agent-codex-<n>` | 同上，命令换成 `codex` |
+| Claude Code | `/api/terminals/{id}/attach` | Agent 类应用：`POST /api/terminals {agent:"claude"}` 创建，再经同一 attach 入口装载 |
+| Codex | `/api/terminals/{id}/attach` | 同上，`{agent:"codex"}` |
 
 **应用注册表**：内置上表应用；Agent 类应用本质是「命令模板 + 终端」，通过 `SHELLBASE_APPS_EXTRA`（JSON）即可追加自定义 Agent 或任意 URL 应用，无需改前端代码。
 
@@ -247,6 +254,7 @@ docker run -d --name shellbase \
 | `SHELLBASE_TOKEN` | 随机生成 | 访问令牌 |
 | `SHELLBASE_PORT` | `8080` | nginx 监听端口 |
 | `SHELLBASE_WORKSPACE` | `/workspace` | 工作根目录 |
+| `SHELLBASE_STATE_DIR` | `/workspace/.shellbase/state` | 后端状态存储目录（见 backend.md） |
 | `SHELLBASE_APPS_EXTRA` | 空 | JSON，追加自定义应用/Agent（名称 + 命令模板或 URL） |
 
 ## 5. 安全设计
@@ -274,9 +282,11 @@ shellbase/
 ├── web/                    # 前端 SPA
 │   └── src/…
 ├── bin/
-│   └── attach.sh           # ttyd → tmux
+│   └── attach.sh           # ttyd → tmux（含注册表校验，见 backend.md）
 └── docs/
-    └── v1/works/design.md  # 本文档
+    └── v1/works/
+        ├── design.md       # 本文档
+        └── backend.md      # Python 后端专项设计（状态管理/存储/302 attach）
 ```
 
 ## 7. 里程碑
