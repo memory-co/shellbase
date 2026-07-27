@@ -21,8 +21,8 @@ shellbase = **在任意 VM 上一条 `docker run` 拉起的 Web 工作台**，�
 | 文件 | 无或只有简陋上传 | 完整文件管理器 + 在线编辑器 |
 | 浏览器 | 无 | 内嵌浏览器面板（iframe），与终端/文件同屏 |
 | Agent | 无 | 一等公民：会话管理、任务下发、状态观测 |
-| 部署 | 依赖宿主 web 服务 | 单容器自包含，nginx 统一入口 |
-| 认证 | 通常裸奔 | token 认证，nginx 层统一鉴权 |
+| 部署 | 依赖宿主 web 服务 | 单容器自包含，OpenResty 统一入口 |
+| 认证 | 通常裸奔 | JWT 认证，网关层统一校验 |
 
 ### 1.3 v1 范围（明确不做的事）
 
@@ -40,7 +40,7 @@ shellbase = **在任意 VM 上一条 `docker run` 拉起的 Web 工作台**，�
                         ┌─────────────────────────── Docker 容器 ───────────────────────────┐
                         │                                                                    │
   浏览器(用户)           │   ┌─────────┐                                                      │
- ───────────────────────┼──▶│  nginx  │  :8080  统一入口 / 静态资源 / 反代 / 鉴权             │
+ ───────────────────────┼──▶│OpenResty│  :8080  统一入口 / 静态资源 / 反代 / JWT 鉴权(Lua)    │
    HTTP + WebSocket     │   └────┬────┘                                                      │
                         │        │                                                           │
                         │        ├── /            → 前端静态文件：分割布局 Shell + 各应用页面（iframe 装载）
@@ -48,29 +48,30 @@ shellbase = **在任意 VM 上一条 `docker run` 拉起的 Web 工作台**，�
                         │        ├── /api/…       → FastAPI   127.0.0.1:8000                 │
                         │        │                  ├─ 文件管理 API                           │
                         │        │                  ├─ Agent 会话管理                         │
-                        │        │                  └─ auth_request 鉴权端点                  │
+                        │        │                  └─ JWT 签发 (login/refresh/logout)        │
                         │        │                                                           │
                         │        └── /tty/…       → ttyd      127.0.0.1:7681  (WebSocket)   │
                         │                            └─ 挂到 tmux 会话上，提供持久终端        │
                         │                                                                    │
                         │   浏览器面板：前端 iframe 直接加载目标 URL，不经容器内进程            │
-                        │   supervisord 负责拉起并守护：nginx / ttyd / fastapi                │
+                        │   supervisord 负责拉起并守护：openresty / ttyd / fastapi            │
                         │   /workspace  ← 挂载卷，终端、文件、Agent 共享同一工作目录           │
                         └────────────────────────────────────────────────────────────────────┘
 ```
 
 核心原则：
 
-1. **nginx 是唯一对外端口**（默认 `:8080`），其余进程全部只监听 `127.0.0.1`；
+1. **OpenResty 是唯一对外端口**（默认 `:8080`），其余进程全部只监听 `127.0.0.1`；
 2. **所有子系统共享 `/workspace`**：终端里 Agent 改的文件，文件面板立刻能看到；文件面板上传的资料，终端里立刻能用；
 3. **ttyd 不直接暴露 shell，而是挂到 tmux**：会话持久化、断线重连、多标签都由 tmux 承担；
 4. **浏览器面板是纯前端能力**：iframe 直接加载目标页面，容器内不跑任何浏览器进程，镜像保持精简；典型用途是查看容器内启动的 web 服务（dev server、文档站等）和允许被嵌入的外部页面。
 
 ## 3. 组件设计
 
-### 3.1 nginx（顶层 HTTP 负载）
+### 3.1 OpenResty（顶层 HTTP 负载）
 
-职责：静态资源、路由、WebSocket 升级、统一鉴权、限流。
+职责：静态资源、路由、WebSocket 升级、统一鉴权（Lua 本地校验 JWT）、限流。
+OpenResty = nginx + LuaJIT，所有常规 nginx 配置能力照用。
 
 路由表：
 
@@ -80,14 +81,12 @@ shellbase = **在任意 VM 上一条 `docker run` 拉起的 Web 工作台**，�
 | `/api/` | `http://127.0.0.1:8000` | FastAPI |
 | `/tty/` | `http://127.0.0.1:7681` | ttyd，需 WS 升级 |
 
-鉴权方案（v1）：
+鉴权方案（详见专项文档 [auth.md](auth.md)）：
 
-- 启动时通过环境变量 `SHELLBASE_TOKEN` 注入访问令牌（不设置则启动时随机生成并打印到容器日志）；
-- 前端登录页把 token 写入 Cookie（`HttpOnly` 由 FastAPI 下发）；
-- nginx 对 `/tty/`、`/api/` 一律走 `auth_request /api/auth/verify`，由 FastAPI 校验 Cookie/Header 中的 token；
-- 静态资源放行，`/api/auth/login` 放行。
-
-这样 ttyd 自身不需要感知认证，鉴权收敛在一处。
+- 登录凭据 `SHELLBASE_TOKEN` 只在 `POST /api/auth/login` 出现一次，FastAPI 校验通过后签发 **HS256 JWT** 写入 `HttpOnly` Cookie；
+- 此后所有请求由 OpenResty 在 `access_by_lua` 阶段**本地验签**（`lua-resty-jwt`），不回调 FastAPI——每请求零子请求开销，且 FastAPI 宕机不影响已登录用户使用终端；
+- 放行名单仅登录页、静态资源、`/api/auth/login`；其余（含 `/tty/` WS 握手）一律校验；
+- ttyd 自身不感知认证，鉴权收敛在网关一处。
 
 关键配置点：
 
@@ -111,7 +110,7 @@ shellbase = **在任意 VM 上一条 `docker run` 拉起的 Web 工作台**，�
 ```
 app/
 ├── main.py              # FastAPI 实例、路由挂载、启动钩子
-├── auth.py              # /api/auth/login, /api/auth/verify (供 nginx auth_request)
+├── auth.py              # /api/auth/{login,refresh,logout,me}，JWT 签发（校验在网关，见 auth.md）
 ├── files.py             # 文件管理
 ├── terminals.py         # tmux 会话枚举/创建/关闭
 ├── agent.py             # Agent 会话管理
@@ -144,7 +143,7 @@ app/
 
 主要用途与已知限制：
 
-- **主用途是查看容器内起的 web 服务**：Agent 在终端里 `npm run dev` 起了 dev server，用户在浏览器面板输入 `http://<host>:<port>` 直接预览。若目标端口未对外映射，可在 nginx 加一条通配代理路由（如 `/proxy/<port>/` → `127.0.0.1:<port>`），作为 v1.1 增强；
+- **主用途是查看容器内起的 web 服务**：Agent 在终端里 `npm run dev` 起了 dev server，用户在浏览器面板输入 `http://<host>:<port>` 直接预览。若目标端口未对外映射，可在 OpenResty 加一条通配代理路由（如 `/proxy/<port>/` → `127.0.0.1:<port>`），作为 v1.1 增强；
 - **外部站点受同源策略约束**：设置了 `X-Frame-Options` / `frame-ancestors` 的站点（大多数登录类站点）无法被 iframe 嵌入，此为方案的已知取舍——遇到时前端提示"在新窗口打开"。
 
 ### 3.5 CLI Agent 子系统
@@ -202,12 +201,12 @@ Agent 与文件/浏览器的融合点：Agent 在终端里跑，工作目录就�
 容器内多进程，用 **supervisord** 守护（成熟、日志方便）：
 
 ```ini
-[program:nginx]      command=nginx -g 'daemon off;'            priority=30
+[program:openresty]  command=openresty -g 'daemon off;'        priority=30
 [program:fastapi]    command=uvicorn app.main:app --host 127.0.0.1 --port 8000   priority=20
 [program:ttyd]       command=ttyd -i 127.0.0.1 -p 7681 -W /opt/shellbase/bin/attach.sh  priority=20
 ```
 
-启动顺序：supervisord → fastapi/ttyd → nginx。entrypoint 脚本负责：生成/打印 token、初始化 `/workspace` 权限、渲染 nginx 配置模板（端口等来自环境变量）。
+启动顺序：supervisord → fastapi/ttyd → openresty。entrypoint 脚本负责：生成/打印 token、生成 JWT 密钥（见 auth.md）、初始化 `/workspace` 权限、渲染 OpenResty 配置模板（端口等来自环境变量）。
 
 ### 4.2 Dockerfile（多阶段）
 
@@ -218,17 +217,17 @@ WORKDIR /src && COPY web/ . && RUN npm ci && npm run build
 
 # 阶段2: 运行时
 FROM debian:bookworm-slim
-RUN apt-get install -y nginx tmux supervisor python3 ...  # + ttyd 二进制
-RUN pip install fastapi uvicorn watchfiles websockets ...
+RUN apt-get install -y tmux supervisor python3 ...  # + openresty(官方 apt 源) + lua-resty-jwt + ttyd 二进制
+RUN pip install fastapi uvicorn pyjwt watchfiles websockets ...
 COPY --from=web /src/dist /opt/shellbase/web
 COPY server/ /opt/shellbase/app
-COPY deploy/nginx.conf.tmpl deploy/supervisord.conf deploy/entrypoint.sh ...
+COPY deploy/openresty/ deploy/supervisord.conf deploy/entrypoint.sh ...
 VOLUME /workspace
 EXPOSE 8080
 ENTRYPOINT ["/opt/shellbase/bin/entrypoint.sh"]
 ```
 
-镜像内以非 root 用户 `shellbase` 运行所有进程（nginx 用非特权端口，故无需 root）。
+镜像内以非 root 用户 `shellbase` 运行所有进程（OpenResty 用非特权端口，故无需 root）。
 
 ### 4.3 启动方式
 
@@ -244,8 +243,10 @@ docker run -d --name shellbase \
 
 | 变量 | 默认 | 说明 |
 |------|------|------|
-| `SHELLBASE_TOKEN` | 随机生成 | 访问令牌 |
-| `SHELLBASE_PORT` | `8080` | nginx 监听端口 |
+| `SHELLBASE_TOKEN` | 随机生成 | 登录凭据（仅登录时使用，换取 JWT） |
+| `SHELLBASE_JWT_SECRET` | 随机生成 | JWT 签名密钥（见 auth.md） |
+| `SHELLBASE_JWT_TTL` | `86400` | JWT 有效期（秒） |
+| `SHELLBASE_PORT` | `8080` | OpenResty 监听端口 |
 | `SHELLBASE_WORKSPACE` | `/workspace` | 工作根目录 |
 | `SHELLBASE_APPS_EXTRA` | 空 | JSON，追加自定义应用/Agent（名称 + 命令模板或 URL） |
 
@@ -253,12 +254,12 @@ docker run -d --name shellbase \
 
 shellbase 本质上是"授权的远程 shell"，安全边界必须清晰：
 
-1. **单一入口**：只有 nginx 端口对外；ttyd、FastAPI 全部绑定 loopback；
-2. **强制 token**：nginx `auth_request` 覆盖所有动态路由，未认证只能看到登录页；token 比较用常量时间比较；连续失败限速（FastAPI 内存计数即可）；
+1. **单一入口**：只有 OpenResty 端口对外；ttyd、FastAPI 全部绑定 loopback；
+2. **强制鉴权**：OpenResty 在 `access_by_lua` 阶段对所有动态路由本地校验 JWT，未认证只能看到登录页；登录凭据常量时间比较；登录接口网关层限速（详见 [auth.md](auth.md)）；
 3. **传输加密**：文档明确告知——公网部署必须在外层套 TLS（云 LB / caddy / 反代），或 `-v` 挂证书启用容器内 HTTPS（v1.1 再做）；
 4. **文件 API 越权防护**：所有路径 `resolve()` 后必须以 workspace 根为前缀，否则 403；符号链接解析后同样受此约束；
 5. **能力自觉**：终端本身就是全量 shell，因此文件 API 不需要也不假装做比 shell 更细的权限控制——安全模型是"拿到 token 即拥有容器"，边界靠容器隔离（建议部署时不加 `--privileged`，按需挂载目录）；
-6. **Cookie**：`HttpOnly + SameSite=Strict`，避免 token 被页面脚本读取及跨站携带。
+6. **Cookie**：`HttpOnly + SameSite=Strict`，避免 JWT 被页面脚本读取及跨站携带。
 
 ## 6. 仓库结构
 
@@ -266,7 +267,9 @@ shellbase 本质上是"授权的远程 shell"，安全边界必须清晰：
 shellbase/
 ├── Dockerfile
 ├── deploy/
-│   ├── nginx.conf.tmpl
+│   ├── openresty/
+│   │   ├── nginx.conf.tmpl
+│   │   └── lualib/shellbase/auth.lua   # JWT 校验（见 auth.md）
 │   ├── supervisord.conf
 │   └── entrypoint.sh
 ├── server/                 # FastAPI
@@ -276,14 +279,16 @@ shellbase/
 ├── bin/
 │   └── attach.sh           # ttyd → tmux
 └── docs/
-    └── v1/works/design.md  # 本文档
+    └── v1/works/
+        ├── design.md       # 本文档
+        └── auth.md         # 鉴权专项设计
 ```
 
 ## 7. 里程碑
 
 | 阶段 | 内容 | 验收标准 |
 |------|------|----------|
-| M1 骨架 | Dockerfile + supervisord + nginx + ttyd(tmux) + FastAPI 健康检查 + token 鉴权 + 分割布局 Shell（终端应用可装块） | 一条 docker run 后登录，任意分割布局并在多个块中使用持久终端 |
+| M1 骨架 | Dockerfile + supervisord + OpenResty + ttyd(tmux) + FastAPI 健康检查 + JWT 鉴权 + 分割布局 Shell（终端应用可装块） | 一条 docker run 后登录，任意分割布局并在多个块中使用持久终端 |
 | M2 文件 | 文件 API 全套 + 文件浏览器应用（树/编辑器/上传下载） | 终端改文件 ⇄ 文件块实时可见、可编辑 |
 | M3 浏览器 | 浏览器应用（地址栏/历史/URL 恢复）+ 布局持久化 | 终端块起 dev server，旁边浏览器块预览；刷新页面布局原样恢复 |
 | M4 Agent | Agent 会话 API + Claude Code / Codex 应用接入选择器 | 空白块选择 Claude Code 即启动会话，可下发任务、直接接管 |
@@ -294,5 +299,5 @@ shellbase/
 1. **ttyd + tmux 而非自研 pty 服务**：ttyd 成熟稳定、WS 协议简单；tmux 免费获得持久化与多会话。代价是多一层依赖，可接受。
 2. **浏览器面板用纯前端 iframe，而非容器内 Chromium（CDP/noVNC）**：容器不跑浏览器进程，镜像小、实现简单、零额外资源开销。代价是设置了 `X-Frame-Options`/`frame-ancestors` 的外部站点无法嵌入——v1 的主场景是预览容器内 web 服务，可接受；若后续需要 Agent 驱动的真实浏览器，再引入 headless Chromium 作为 v2 能力。
 3. **supervisord 而非 s6/多容器 compose**："单 Dockerfile 拉起"是硬需求，排除 compose；supervisord 配置直观、python 生态一致。
-4. **鉴权收敛到 nginx auth_request**：ttyd/静态资源无需各自实现认证，未来换认证方式只改一处。
+4. **鉴权收敛到网关：OpenResty + Lua 本地校验 JWT，而非 nginx auth_request 回调**：每请求零子请求开销，FastAPI 只负责签发；ttyd/静态资源/各应用均无需感知认证，未来换认证方式只改网关一处。详见 [auth.md](auth.md)。
 5. **前端采用"分割布局 Shell + iframe 应用"而非单体 SPA**：组合能力放在布局层（任意分割、每块自选应用），应用本身只是 URL——终端直接复用 ttyd 自带页面，零终端渲染代码；应用彼此隔离、可独立开发、可通过配置扩展（新增一个 Agent 只是注册一条命令模板）。代价是跨块联动（如文件树点击在编辑器块打开）需要经 Shell 层 postMessage 中转，v1 仅实现最小联动。
