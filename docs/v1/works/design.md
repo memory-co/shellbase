@@ -7,7 +7,7 @@
 
 ### 1.1 一句话定位
 
-shellbase = **在任意 VM 上一条 `docker run` 拉起的 Web 工作台**，把三类能力融合进同一个页面：
+shellbase = **在任意 VM 上一条 `docker run` 拉起的 Web 工作台**，页面是一块可自由分割的画布，每个分割块自选应用（终端 / Claude Code / Codex / 文件浏览器 / 浏览器……），把三类能力融合进同一屏：
 
 1. **终端（Terminal）**：真实的 shell / tmux 会话，可以直接跑 CLI Agent（如 Claude Code）；
 2. **浏览器（Browser）**：前端内嵌的浏览器面板（iframe），与终端、文件并排使用；
@@ -43,7 +43,7 @@ shellbase = **在任意 VM 上一条 `docker run` 拉起的 Web 工作台**，�
  ───────────────────────┼──▶│  nginx  │  :8080  统一入口 / 静态资源 / 反代 / 鉴权             │
    HTTP + WebSocket     │   └────┬────┘                                                      │
                         │        │                                                           │
-                        │        ├── /            → 前端 SPA 静态文件（xterm.js + 文件树 + 浏览器画布）
+                        │        ├── /            → 前端静态文件：分割布局 Shell + 各应用页面（iframe 装载）
                         │        │                                                           │
                         │        ├── /api/…       → FastAPI   127.0.0.1:8000                 │
                         │        │                  ├─ 文件管理 API                           │
@@ -99,8 +99,8 @@ shellbase = **在任意 VM 上一条 `docker run` 拉起的 Web 工作台**，�
 
 - ttyd 以 `ttyd -i 127.0.0.1 -p 7681 -W /opt/shellbase/bin/attach.sh` 启动；
 - `attach.sh` 逻辑：`tmux new-session -A -s main -c /workspace`——存在则 attach，不存在则创建；
-- 前端不用 ttyd 自带页面，而是用 **xterm.js 直连 `/tty/` 的 WebSocket**（ttyd 的 ws 协议是公开的），这样终端才能作为一个组件嵌入融合界面，而不是一个独立 iframe；
-- 多终端标签：URL query 传 `?arg=<session>`，`attach.sh` 据此 attach 不同 tmux 会话；FastAPI 提供 `GET /api/terminals` 列出 tmux 会话供前端渲染标签页。
+- 前端**直接以 iframe 装载 ttyd 自带页面**（配合 3.6 的分割布局，终端就是一种可放进块里的应用），不自研终端渲染层；
+- 多终端：URL query 传 `?arg=<session>`，`attach.sh` 据此 attach 不同 tmux 会话——每个终端块一个会话；FastAPI 提供 `GET /api/terminals` 列出 tmux 会话供应用选择器展示。
 
 选 tmux 而不是裸 pty 的理由：断线重连不丢现场、Agent 长任务不因刷新页面而中断、天然支持多会话，并且 Agent 的输出历史可以通过 `tmux capture-pane` 被 API 读取。
 
@@ -136,7 +136,7 @@ app/
 
 技术选型：**纯前端 iframe**，容器内不引入任何浏览器进程。
 
-浏览器面板就是主区的一种标签页：地址栏 + `<iframe>`，输入 URL 直接加载。实现上只有前端工作：
+浏览器是一个可装进布局块的应用页面（`/apps/browser`）：地址栏 + `<iframe>`，输入 URL 直接加载。实现上只有前端工作：
 
 - 地址栏、前进/后退（维护面板自身的历史栈，`iframe.src` 切换）、刷新、新标签；
 - iframe 加 `sandbox` 属性按需放权，避免嵌入页影响宿主页面；
@@ -151,36 +151,49 @@ app/
 
 v1 的 Agent 模型是「**运行在 tmux 会话里的 CLI Agent 进程**」，平台负责拉起、观测、交互，不重新发明 Agent 运行时：
 
-- `POST /api/agent/sessions`：创建一个 tmux 会话并在其中启动配置好的 Agent 命令
-  （镜像内预装可配置，如 `claude`；命令模板由 `SHELLBASE_AGENT_CMD` 环境变量定义）；
+- `POST /api/agent/sessions`：创建一个 tmux 会话并在其中启动指定 Agent 的命令
+  （命令模板来自应用注册表：内置 `claude`、`codex` 等，可经 `SHELLBASE_APPS_EXTRA` 扩展，见 3.6）；
 - `GET /api/agent/sessions`：列出 Agent 会话及状态（running / idle / exited，通过 tmux pane 的存活 + 前台进程判断）；
 - `POST /api/agent/sessions/{id}/input`：向会话注入文本（`tmux send-keys`），用于程序化下发任务；
 - `GET /api/agent/sessions/{id}/output`：`tmux capture-pane` 抓取最近输出；
-- 前端可以随时把某个 Agent 会话「接管」为普通终端标签——因为它本来就是 tmux 会话。
+- Agent 应用块（如 Claude Code、Codex）装载的就是该 tmux 会话的终端——因此"观察 Agent"和"接管操作"是同一个块，无需切换。
 
-Agent 与文件/浏览器的融合点：Agent 在终端里跑，工作目录就是 `/workspace`（与文件面板同源）；Agent 起的 web 服务（dev server 等），用户直接在浏览器面板（iframe）里输入地址预览，形成"Agent 改代码 → 面板看效果"的闭环。
+Agent 与文件/浏览器的融合点：Agent 在终端里跑，工作目录就是 `/workspace`（与文件浏览器应用同源）；Agent 起的 web 服务（dev server 等），用户在旁边的浏览器块里输入地址即可预览——同屏分割布局让"Agent 改代码 → 看效果"零切换。
 
-### 3.6 前端
+### 3.6 前端：可自由分割的应用画布
 
-单页应用，nginx 直接托管静态产物。v1 保持轻量：Vite + React + TypeScript。
-
-布局（IDE 式三区）：
+前端不是 IDE 式固定布局，而是一个**可自由分割的画布（tiling shell）**：页面可以横向/纵向任意切分成块，每个块里是一个 iframe，用户在块内选择要装载的「应用」。
 
 ```
-┌────────────┬──────────────────────────────┐
-│  文件树     │   主区：多标签               │
-│  (可折叠)   │   [终端1] [终端2] [浏览器]    │
-│            │   [编辑器: xxx.py] [Agent#1] │
-│            │                              │
-├────────────┴──────────────────────────────┤
-│  状态栏：连接状态 / CPU / 内存 / 磁盘        │
-└───────────────────────────────────────────┘
+┌───────────────────────┬───────────────────┐
+│                       │  [浏览器]          │
+│   [终端: main]        │  http://:5173     │
+│                       ├───────────────────┤
+│                       │  [Claude Code]    │
+├───────────────────────┤                   │
+│   [文件浏览器]         │                   │
+└───────────────────────┴───────────────────┘
+  ── 每条分割线可拖拽；每个块可继续二分、关闭、更换应用 ──
 ```
 
-- 终端：xterm.js（+ fit / webgl addon）对接 ttyd WS 协议；
-- 编辑器：CodeMirror 6（比 Monaco 轻，v1 够用），对接文件 API；
-- 浏览器：iframe + 地址栏 + 历史栈（见 3.4）；
-- 拖拽上传到文件树；文件树通过 `/api/files/watch` 实时刷新。
+**Shell 层**（顶层页面，Vite + React + TypeScript，保持很薄）：
+
+- 布局模型是**递归二叉分割树**：每个节点要么是横/纵分割（带比例），要么是叶子（一个块）；支持拖拽调整比例、任意块再分割、关闭合并；
+- 空白块显示**应用选择器**，选中后块内创建 iframe 指向该应用的 URL；
+- 布局树 + 每块的应用与参数持久化到 localStorage，刷新后原样恢复（终端块靠 tmux 恢复现场，天然无损）；
+- 同源 iframe 自动携带认证 Cookie，各应用无需单独处理鉴权。
+
+**应用即 URL**：每个应用是一个独立可访问的页面，Shell 只负责把它装进 iframe。这让应用之间完全解耦，新增应用只是注册一条 URL。
+
+| 应用 | URL | 说明 |
+|------|-----|------|
+| 终端 | `/tty/?arg=<session>` | 直接装载 ttyd 自带页面，attach 指定 tmux 会话 |
+| 文件浏览器 | `/apps/files` | 文件树 + CodeMirror 6 编辑器 + 上传下载，对接文件 API，经 `/api/files/watch` 实时刷新 |
+| 浏览器 | `/apps/browser` | 地址栏 + 内层 iframe（见 3.4） |
+| Claude Code | `/tty/?arg=agent-claude-<n>` | Agent 类应用：先经 `/api/agent/sessions` 创建运行 `claude` 的 tmux 会话，再装载其终端 |
+| Codex | `/tty/?arg=agent-codex-<n>` | 同上，命令换成 `codex` |
+
+**应用注册表**：内置上表应用；Agent 类应用本质是「命令模板 + 终端」，通过 `SHELLBASE_APPS_EXTRA`（JSON）即可追加自定义 Agent 或任意 URL 应用，无需改前端代码。
 
 ## 4. 进程模型与 Dockerfile
 
@@ -234,7 +247,7 @@ docker run -d --name shellbase \
 | `SHELLBASE_TOKEN` | 随机生成 | 访问令牌 |
 | `SHELLBASE_PORT` | `8080` | nginx 监听端口 |
 | `SHELLBASE_WORKSPACE` | `/workspace` | 工作根目录 |
-| `SHELLBASE_AGENT_CMD` | `claude` | Agent 启动命令模板 |
+| `SHELLBASE_APPS_EXTRA` | 空 | JSON，追加自定义应用/Agent（名称 + 命令模板或 URL） |
 
 ## 5. 安全设计
 
@@ -270,10 +283,10 @@ shellbase/
 
 | 阶段 | 内容 | 验收标准 |
 |------|------|----------|
-| M1 骨架 | Dockerfile + supervisord + nginx + ttyd(tmux) + FastAPI 健康检查 + token 鉴权 | 一条 docker run 后，浏览器登录并使用持久终端 |
-| M2 文件 | 文件 API 全套 + 前端文件树/编辑器/上传下载 | 终端改文件 ⇄ 面板实时可见、可编辑 |
-| M3 浏览器 | iframe 浏览器面板（地址栏/历史/多标签/URL 恢复） | 在面板中预览容器内 dev server 页面 |
-| M4 Agent | Agent 会话 API + 前端 Agent 面板 | 一键启动 Claude Code 会话，可下发任务、接管终端 |
+| M1 骨架 | Dockerfile + supervisord + nginx + ttyd(tmux) + FastAPI 健康检查 + token 鉴权 + 分割布局 Shell（终端应用可装块） | 一条 docker run 后登录，任意分割布局并在多个块中使用持久终端 |
+| M2 文件 | 文件 API 全套 + 文件浏览器应用（树/编辑器/上传下载） | 终端改文件 ⇄ 文件块实时可见、可编辑 |
+| M3 浏览器 | 浏览器应用（地址栏/历史/URL 恢复）+ 布局持久化 | 终端块起 dev server，旁边浏览器块预览；刷新页面布局原样恢复 |
+| M4 Agent | Agent 会话 API + Claude Code / Codex 应用接入选择器 | 空白块选择 Claude Code 即启动会话，可下发任务、直接接管 |
 | M5 打磨 | 断线重连、限流、日志、system info、文档 | 30 分钟断网重连后现场无损 |
 
 ## 8. 主要技术决策记录（ADR 摘要)
@@ -282,4 +295,4 @@ shellbase/
 2. **浏览器面板用纯前端 iframe，而非容器内 Chromium（CDP/noVNC）**：容器不跑浏览器进程，镜像小、实现简单、零额外资源开销。代价是设置了 `X-Frame-Options`/`frame-ancestors` 的外部站点无法嵌入——v1 的主场景是预览容器内 web 服务，可接受；若后续需要 Agent 驱动的真实浏览器，再引入 headless Chromium 作为 v2 能力。
 3. **supervisord 而非 s6/多容器 compose**："单 Dockerfile 拉起"是硬需求，排除 compose；supervisord 配置直观、python 生态一致。
 4. **鉴权收敛到 nginx auth_request**：ttyd/静态资源无需各自实现认证，未来换认证方式只改一处。
-5. **前端自绘终端（xterm.js 直连 ttyd WS）而非 iframe 嵌 ttyd 页面**：融合终端要求终端是可组合的组件（分屏、标签、与文件/浏览器联动），iframe 做不到。
+5. **前端采用"分割布局 Shell + iframe 应用"而非单体 SPA**：组合能力放在布局层（任意分割、每块自选应用），应用本身只是 URL——终端直接复用 ttyd 自带页面，零终端渲染代码；应用彼此隔离、可独立开发、可通过配置扩展（新增一个 Agent 只是注册一条命令模板）。代价是跨块联动（如文件树点击在编辑器块打开）需要经 Shell 层 postMessage 中转，v1 仅实现最小联动。
