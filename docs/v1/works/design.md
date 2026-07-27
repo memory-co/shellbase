@@ -101,7 +101,7 @@ shellbase = **在任意 VM 上一条 `docker run` 拉起的 Web 工作台**，�
 - `attach.sh` 逻辑：`tmux new-session -A -s main -c /workspace`——存在则 attach，不存在则创建；
 - 前端**直接以 iframe 装载 ttyd 自带页面**（配合 3.6 的分割布局，终端就是一种可放进块里的应用），不自研终端渲染层；
 - 多终端：URL query 传 `?arg=<session>`，`attach.sh` 据此 attach 不同 tmux 会话——每个终端块一个会话；
-- **会话注册制**：终端块的 iframe 不直接指向 `/tty/`，而是指向 `/api/terminals/{id}/attach`，由 FastAPI 校验注册表后 302 跳转到 `/tty/?arg=<id>`；`attach.sh` 创建会话前也校验注册表，未注册的 session 名直接拒绝——杜绝拼 URL"无中生有"会话，后端因此掌握全部打开中的终端（详见 [backend.md](backend.md)）。
+- **会话经 Python 收口**：终端块的 iframe 不直接指向 `/tty/`，而是指向 `/api/terminals/{id}/attach`——FastAPI 借鉴 ttyd `arg` 的语义支持**无中生有**（没见过的 id 当场登记一条 state，每个面板就是一条 state），再 302 到 `/tty/?arg=<id>`；而底下的终端层不允许无中生有：`attach.sh` 只对已有 state 的会话执行 `tmux new-session -A`。因此后端始终掌握全部打开中的面板（详见 [backend.md](backend.md)）。
 
 选 tmux 而不是裸 pty 的理由：断线重连不丢现场、Agent 长任务不因刷新页面而中断、天然支持多会话，并且 Agent 的输出历史可以通过 `tmux capture-pane` 被 API 读取。
 
@@ -194,7 +194,7 @@ Agent 与文件/浏览器的融合点：Agent 在终端里跑，工作目录就�
 
 | 应用 | URL | 说明 |
 |------|-----|------|
-| 终端 | `/api/terminals/{id}/attach` | 先 `POST /api/terminals` 注册，iframe 经此 302 到 ttyd 页面（见 backend.md） |
+| 终端 | `/api/terminals/{id}/attach` | id 可新造：Python 层无中生有登记 state 后 302 到 ttyd 页面（见 backend.md） |
 | 文件浏览器 | `/apps/files` | 文件树 + CodeMirror 6 编辑器 + 上传下载，对接文件 API，经 `/api/files/watch` 实时刷新 |
 | 浏览器 | `/apps/browser` | 地址栏 + 内层 iframe（见 3.4） |
 | Claude Code | `/api/terminals/{id}/attach` | Agent 类应用：`POST /api/terminals {agent:"claude"}` 创建，再经同一 attach 入口装载 |

@@ -13,56 +13,54 @@
 
 由此得到核心承诺：**用户任何时候重新进入 shellbase（换浏览器、换设备、容器重启后），都能恢复出和离开时一模一样的页面**——布局从后端读，块里的终端靠 tmux 现场还在。
 
-## 2. 终端会话：注册制 + 302 attach
+## 2. 终端会话：借鉴 ttyd arg 的无中生有 + 302 attach
 
 ### 2.1 问题
 
-若前端直接拼 `/tty/?arg=<session>` 装进 iframe，用户（或任何拿到 URL 的请求）可以**无中生有**：随便编一个 session 名，`attach.sh` 的 `tmux new-session -A` 就会创建它。后端对"当前开着哪些终端"一无所知，布局恢复、状态观测、回收都无从谈起。
+若前端直接拼 `/tty/?arg=<session>` 装进 iframe，session 会在 ttyd/tmux 层被凭空创建，后端对"当前开着哪些终端"一无所知，布局恢复、状态观测、回收都无从谈起。
 
-### 2.2 方案：先注册，再跳转
+### 2.2 方案：attach 入口收到 Python，语义照搬 ttyd arg
 
-终端一律先向后端申请，后端登记后用 **302** 把 iframe 带到 ttyd：
+state 的设计**借鉴 ttyd `arg` 的无中生有语义**：`/api/terminals/{id}/attach` 收到一个没见过的 id，就**当场登记一条 state**（等价于 `tmux new-session -A` 的"有则 attach、无则创建"），然后 302 到 ttyd。**每个面板就是一条 state**——面板打开的动作本身完成登记，前端无需先走一次显式创建。
 
 ```
-前端 Shell                    FastAPI                        ttyd
-   │ POST /api/terminals         │                             │
-   │────────────────────────────▶│ 分配 id (term-3)             │
-   │◀─{id, attach_url}───────────│ 写入 terminals/term-3.json   │
-   │                             │                             │
-   │ iframe.src =                │                             │
-   │  /api/terminals/term-3/attach                             │
-   │────────────────────────────▶│ 校验注册表存在                │
-   │◀─302 /tty/?arg=term-3───────│ 更新 last_attached          │
-   │                             │                             │
-   │──(iframe 跟随 302)──────────────────────────────────────▶│ attach.sh → tmux
+前端 Shell                    FastAPI                          ttyd
+   │ iframe.src =                │                               │
+   │  /api/terminals/term-3/attach                               │
+   │────────────────────────────▶│ 注册表有 term-3？              │
+   │                             │  ├─ 无 → 写 terminals/term-3.json（无中生有）
+   │                             │  └─ 有 → 更新 last_attached    │
+   │◀─302 /tty/?arg=term-3───────│                               │
+   │                             │                               │
+   │──(iframe 跟随 302)────────────────────────────────────────▶│ attach.sh → tmux
 ```
 
 - iframe 的 `src` 永远指向 `/api/terminals/{id}/attach`，而不是 `/tty/` 本身；浏览器对 iframe 内的 302 会自动跟随，对前端完全透明；
-- 每次 attach 都经过后端，因此后端天然知道**每个终端最近一次被打开的时间**，这是状态观测和回收的依据。
+- 无中生有发生在 Python 这一层，因此后端能看到**开了多少个面板、每个面板何时创建、最近一次被打开是什么时候**。
 
-### 2.3 封死"无中生有"
+### 2.3 创建收口在 Python
 
-302 只是引导，真正的强制在 pty 创建点：`attach.sh` 创建会话前校验注册表——
+`attach.sh` 在 pty 创建点校验 state 文件，保证任何会话的诞生都必然经过了 Python：
 
 ```bash
 # bin/attach.sh（ttyd -W 调用，$1 = session 名）
 STATE=/workspace/.shellbase/state
 if [ ! -f "$STATE/terminals/$1.json" ]; then
-    echo "unknown session: $1 (create it via the shellbase UI)"; exit 1
+    echo "unknown session: $1 (open it via the shellbase UI)"; exit 1
 fi
 exec tmux new-session -A -s "$1" -c /workspace
 ```
 
-未注册的 session 名即使直接访问 `/tty/?arg=rogue`（已通过鉴权的用户手工构造）也只会得到一行错误、不会产生 pty。注册表文件由 FastAPI 独家写入，`attach.sh` 只读。
+绕过 attach 端点直接访问 `/tty/?arg=rogue` 不会产生 pty；经 `/api/terminals/rogue/attach` 进来则先落 state 再放行——两条路都保证 state 与实际会话一一对应。state 文件由 FastAPI 独家写入，`attach.sh` 只读。
 
 ### 2.4 终端 API
 
 | 端点 | 功能 |
 |------|------|
-| `POST /api/terminals` | 创建：分配 `term-<n>`，写注册表，返回 `{id, attach_url}`；body 可带 `{agent: "claude"}` 创建 Agent 终端（见 §5） |
-| `GET  /api/terminals/{id}/attach` | 校验存在 → `302 /tty/?arg=<id>`；不存在 → 404 |
-| `GET  /api/terminals` | 列表：注册表 ∪ `tmux ls` 的合并视图，含状态（alive / exited） |
-| `DELETE /api/terminals/{id}` | `tmux kill-session` + 移除注册表项 |
+| `GET  /api/terminals/{id}/attach` | 有则更新 `last_attached`、无则登记（无中生有）→ `302 /tty/?arg=<id>` |
+| `POST /api/terminals` | 显式创建（可选路径）：分配 `term-<n>` 返回 `{id, attach_url}`；body 带 `{agent: "claude"}` 时创建 Agent 终端（见 §5，Agent 需启动命令，不走无中生有） |
+| `GET  /api/terminals` | 列表：state ∪ `tmux ls` 的合并视图，含状态（alive / exited） |
+| `DELETE /api/terminals/{id}` | `tmux kill-session` + 移除 state |
 
 ## 3. 存储：文件系统，不引数据库
 
@@ -116,7 +114,7 @@ exec tmux new-session -A -s "$1" -c /workspace
 
 - **写**：前端 Shell 在每次布局变更（分割/关闭/换应用/拖比例结束）后，**防抖 ~500ms** 调 `PUT /api/layout` 全量覆盖；`version` 单调递增，后端拒绝旧版本覆盖新版本（last-write-wins，防两个标签页互相打架时旧页面回写）；
 - **读**：Shell 启动时 `GET /api/layout` 还原整棵树；
-- **对账后恢复**：还原时对每个 `terminal` 叶子核对注册表——会话仍存在（tmux 现场还在）则直接 attach；已消亡（如容器重启且未持久化 tmux）则按原参数**自动重建**同名会话，块的位置与用途不变，只是 shell 现场从头开始；
+- **恢复零特判**：还原时每个 `terminal` 叶子照常把 iframe 指向 `/api/terminals/{id}/attach` 即可——tmux 现场还在则原样接上；会话已消亡（如容器重启）则由无中生有语义自动重建同名会话，块的位置与用途不变，只是 shell 现场从头开始；
 - localStorage 不再承担布局存储，仅可留作断网时的临时兜底。
 
 | 端点 | 功能 |
