@@ -51,14 +51,17 @@ fi
 exec tmux new-session -A -s "$1" -c /workspace
 ```
 
-绕过 attach 端点直接访问 `/tty/?arg=rogue` 不会产生 pty；经 `/api/terminals/rogue/attach` 进来则先落 state 再放行——两条路都保证 state 与实际会话一一对应。state 文件由 FastAPI 独家写入，`attach.sh` 只读。
+绕过 attach 端点直接访问 `/tty/?arg=rogue` 不会产生 pty；经 attach 端点进来则先落 state 再放行——两条路都保证 state 与实际会话一一对应。state 文件由 FastAPI 独家写入，`attach.sh` 只读。
+
+带自定义 cwd 或启动命令的会话（Agent 类，见 §5）由 FastAPI 在 302 之前**预创建** tmux 会话并拉起命令，`attach.sh` 的 `new-session -A` 对它们只会命中已存在的会话；上面片段中的默认 `-c /workspace` 仅作用于普通 bash 会话。
 
 ### 2.4 终端 API
 
 | 端点 | 功能 |
 |------|------|
-| `GET  /api/terminals/{id}/attach` | 有则更新 `last_attached`、无则登记（无中生有）→ `302 /tty/?arg=<id>` |
-| `POST /api/terminals` | 显式创建（可选路径）：分配 `term-<n>` 返回 `{id, attach_url}`；body 带 `{agent: "claude"}` 时创建 Agent 终端（见 §5，Agent 需启动命令，不走无中生有） |
+| `GET  /api/terminals/attach?uri=` | 主入口：URI 规范化 → 确定性派生 id（见 [uri.md](uri.md)）→ 有则更新 `last_attached`、无则登记（无中生有，state 记录原始 URI/cwd/命令）→ `302 /tty/?arg=<id>` |
+| `GET  /api/terminals/{id}/attach` | 按已知 id attach（等价于用 state 中记录的 URI 走上一行） |
+| `POST /api/terminals` | 显式创建（可选路径）：不带 URI 时分配匿名会话 `term-<n>`，返回 `{id, attach_url}` |
 | `GET  /api/terminals` | 列表：state ∪ `tmux ls` 的合并视图，含状态（alive / exited） |
 | `DELETE /api/terminals/{id}` | `tmux kill-session` + 移除 state |
 
@@ -72,10 +75,12 @@ exec tmux new-session -A -s "$1" -c /workspace
 /workspace/.shellbase/state/
 ├── layout.json                 # 整个页面的分割布局（§4）
 ├── terminals/
-│   ├── term-1.json             # {id, kind:"plain", created_at, last_attached}
-│   ├── term-2.json
-│   └── agent-claude-1.json     # {id, kind:"agent", agent:"claude", created_at, ...}
-└── counters.json               # id 自增计数
+│   ├── bash-main.json          # {id, uri:"bash://main", kind:"plain", created_at, last_attached}
+│   ├── bash-build.json
+│   └── claude-workspace-myproj.json
+│                               # {id, uri:"claude:///workspace/myproj", kind:"agent",
+│                               #  cwd:"/workspace/myproj", cmd:"claude", ...}
+└── counters.json               # 匿名会话的自增计数
 ```
 
 ### 3.2 读写纪律
@@ -99,11 +104,11 @@ exec tmux new-session -A -s "$1" -c /workspace
   "root": {
     "type": "split", "dir": "row", "ratio": 0.6,
     "children": [
-      { "type": "leaf", "app": "terminal", "params": { "id": "term-1" } },
+      { "type": "leaf", "uri": "bash://main" },
       { "type": "split", "dir": "col", "ratio": 0.5,
         "children": [
-          { "type": "leaf", "app": "browser",  "params": { "url": "http://host:5173" } },
-          { "type": "leaf", "app": "terminal", "params": { "id": "agent-claude-1" } }
+          { "type": "leaf", "uri": "https://localhost:5173/" },
+          { "type": "leaf", "uri": "claude:///workspace/myproj" }
         ] }
     ]
   }
@@ -126,7 +131,7 @@ exec tmux new-session -A -s "$1" -c /workspace
 
 Agent 会话**就是**一条 `kind: "agent"` 的终端注册项，复用同一套注册/attach/回收机制：
 
-- `POST /api/terminals {agent: "claude"}` → 分配 `agent-claude-<n>`，注册后在该 tmux 会话内启动应用注册表中该 Agent 的命令模板；
+- Agent 块的 URI（`claude:///workspace/proj`、`codex:///…`，见 uri.md）走统一 attach 入口：派生 id、登记 state（记录 cwd 与命令模板）、以该 cwd 创建 tmux 会话并启动应用注册表中该 Agent 的命令；
 - design.md §3.5 的观测与交互接口（`input` / `output` / 状态）挂在同一 id 上：
   `POST /api/terminals/{id}/input`（`tmux send-keys`）、`GET /api/terminals/{id}/output`（`tmux capture-pane`）；
 - 前端 Agent 块的 iframe 同样指向 `/api/terminals/{id}/attach`——观察与接管是同一个块。

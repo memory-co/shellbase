@@ -151,7 +151,7 @@ app/
 
 主要用途与已知限制：
 
-- **主用途是查看容器内起的 web 服务**：Agent 在终端里 `npm run dev` 起了 dev server，用户在浏览器面板输入 `http://<host>:<port>` 直接预览。若目标端口未对外映射，可在 nginx 加一条通配代理路由（如 `/proxy/<port>/` → `127.0.0.1:<port>`），作为 v1.1 增强；
+- **主用途是查看容器内起的 web 服务**：Agent 在终端里 `npm run dev` 起了 dev server，用户在浏览器面板输入 `http://<host>:<port>` 直接预览。目标端口无需对外映射——`https://localhost:<port>` 类 URI 经 nginx 通配代理路由（`/proxy/<port>/` → `127.0.0.1:<port>`）访问，同源且无嵌入限制（见 [uri.md](uri.md)）；
 - **外部站点受同源策略约束**：设置了 `X-Frame-Options` / `frame-ancestors` 的站点（大多数登录类站点）无法被 iframe 嵌入，此为方案的已知取舍——遇到时前端提示"在新窗口打开"。
 
 ### 3.5 CLI Agent 子系统
@@ -187,21 +187,21 @@ Agent 与文件/浏览器的融合点：Agent 在终端里跑，工作目录就�
 **Shell 层**（顶层页面，Vite + React + TypeScript，保持很薄）：
 
 - 布局模型是**递归二叉分割树**：每个节点要么是横/纵分割（带比例），要么是叶子（一个块）；支持拖拽调整比例、任意块再分割、关闭合并；
-- 空白块显示**应用选择器**，选中后块内创建 iframe 指向该应用的 URL；
+- 空白块显示**应用选择器**——本质是 URI 构造器（选应用 + 填参数 = 生成块的 URI，见 [uri.md](uri.md)），随后块内创建 iframe 装载解析结果；
 - 布局树 + 每块的应用与参数**持久化在后端**（`GET/PUT /api/layout`，防抖全量覆盖，见 [backend.md](backend.md)）——换浏览器、换设备、容器重启后进入，都恢复出一模一样的页面（终端块靠 tmux 恢复现场，天然无损）；
 - 同源 iframe 自动携带认证 Cookie，各应用无需单独处理鉴权。
 
-**应用即 URL**：每个应用是一个独立可访问的页面，Shell 只负责把它装进 iframe。这让应用之间完全解耦，新增应用只是注册一条 URL。
+**块即 URI**：每个块由一个虚拟 URI 唯一定位（专项设计见 [uri.md](uri.md)），它是块的身份、持久化内容和重入凭证；Shell 内置解析器把 URI 翻译成 iframe 的实际 `src`：
 
-| 应用 | URL | 说明 |
+| 块 URI 示例 | 应用 | 解析为 |
 |------|-----|------|
-| 终端 | `/api/terminals/{id}/attach` | id 可新造：Python 层无中生有登记 state 后 302 到 ttyd 页面（见 backend.md） |
-| 文件浏览器 | `/apps/files` | 文件树 + CodeMirror 6 编辑器 + 上传下载，对接文件 API，经 `/api/files/watch` 实时刷新 |
-| 浏览器 | `/apps/browser` | 地址栏 + 内层 iframe（见 3.4） |
-| Claude Code | `/api/terminals/{id}/attach` | Agent 类应用：`POST /api/terminals {agent:"claude"}` 创建，再经同一 attach 入口装载 |
-| Codex | `/api/terminals/{id}/attach` | 同上，`{agent:"codex"}` |
+| `bash://main` | 终端 | `/api/terminals/attach?uri=…` → 302 到 ttyd 页面（无中生有，见 backend.md） |
+| `file:///workspace/src` | 文件浏览器 | `/apps/files?path=…`（文件树 + CodeMirror 6 编辑器 + 上传下载，经 `/api/files/watch` 实时刷新） |
+| `https://www.example.com` | 浏览器（外链） | 直接作为 iframe src（见 3.4） |
+| `https://localhost:5173` | 浏览器（本地服务） | nginx 通配代理 `/proxy/5173/`，同源无嵌入限制 |
+| `claude:///workspace/proj`、`codex:///…` | Agent | Agent 终端：cwd 为 path、启动对应命令，同经 attach 入口 |
 
-**应用注册表**：内置上表应用；Agent 类应用本质是「命令模板 + 终端」，通过 `SHELLBASE_APPS_EXTRA`（JSON）即可追加自定义 Agent 或任意 URL 应用，无需改前端代码。
+**应用注册表**：内置上表 scheme；通过 `SHELLBASE_APPS_EXTRA`（JSON）注册新 scheme——`terminal` 型（命令模板）或 `url` 型（地址改写）——即可追加自定义 Agent 或任意 web 应用，无需改前端代码。
 
 ## 4. 进程模型与 Dockerfile
 
@@ -288,7 +288,8 @@ shellbase/
     └── v1/works/
         ├── design.md       # 本文档
         ├── backend.md      # Python 后端专项设计（状态管理/存储/302 attach）
-        └── collab.md       # 多人协作专项设计（state 共享/布局广播）
+        ├── collab.md       # 多人协作专项设计（state 共享/布局广播）
+        └── uri.md          # 虚拟 URI 定位符设计（块的身份与重入）
 ```
 
 ## 7. 里程碑
