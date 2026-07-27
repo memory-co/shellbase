@@ -131,7 +131,11 @@ Agent 会话**就是**一条 `kind: "agent"` 的终端注册项，复用同一�
   `POST /api/terminals/{id}/input`（`tmux send-keys`）、`GET /api/terminals/{id}/output`（`tmux capture-pane`）；
 - 前端 Agent 块的 iframe 同样指向 `/api/terminals/{id}/attach`——观察与接管是同一个块。
 
-## 6. 对账与回收（reconciliation）
+## 6. 多人协作
+
+state 是共享单元，"打开"只是 attach、不是独占——多个客户端可同时打开同一个终端、同一个页面。专项设计见 [collab.md](collab.md)。
+
+## 7. 对账与回收（reconciliation）
 
 注册表说的（应然）和 tmux 里实际存在的（实然）可能漂移，后端负责对齐：
 
@@ -140,13 +144,13 @@ Agent 会话**就是**一条 `kind: "agent"` 的终端注册项，复用同一�
 - **tmux 有、注册表无**（用户在终端里手工 `tmux new`）：不杀、不收编，列表中标记为 `external`，不参与布局恢复；
 - **垃圾回收**：`exited` 且不再被 `layout.json` 任何叶子引用的注册项，超过保留期（默认 7 天）后清除。
 
-## 7. 环境变量
+## 8. 环境变量
 
 | 变量 | 默认 | 说明 |
 |------|------|------|
 | `SHELLBASE_STATE_DIR` | `/workspace/.shellbase/state` | 状态存储根目录（置于挂载卷以跨容器存活） |
 
-## 8. 对 design.md 的影响清单
+## 9. 对 design.md 的影响清单
 
 - §3.2 / §3.6：终端与 Agent 块的 iframe 不再直拼 `/tty/?arg=…`，改为 `/api/terminals/{id}/attach`（302）；`attach.sh` 增加注册表校验；
 - §3.6：布局持久化从 localStorage 改为后端 `/api/layout`；

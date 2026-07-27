@@ -23,6 +23,7 @@ shellbase = **在任意 VM 上一条 `docker run` 拉起的 Web 工作台**，�
 | Agent | 无 | 一等公民：会话管理、任务下发、状态观测 |
 | 部署 | 依赖宿主 web 服务 | 单容器自包含，nginx 统一入口 |
 | 认证 | 通常裸奔 | token 认证，nginx 层统一鉴权 |
+| 协作 | 无 | 多客户端同开一个页面/终端，实时镜像（见 [collab.md](collab.md)） |
 
 ### 1.3 v1 范围（明确不做的事）
 
@@ -286,7 +287,8 @@ shellbase/
 └── docs/
     └── v1/works/
         ├── design.md       # 本文档
-        └── backend.md      # Python 后端专项设计（状态管理/存储/302 attach）
+        ├── backend.md      # Python 后端专项设计（状态管理/存储/302 attach）
+        └── collab.md       # 多人协作专项设计（state 共享/布局广播）
 ```
 
 ## 7. 里程碑
