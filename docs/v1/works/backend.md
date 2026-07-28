@@ -19,23 +19,23 @@
 
 若前端直接拼 `/tty/?arg=<session>` 装进 iframe，session 会在 ttyd/tmux 层被凭空创建，后端对"当前开着哪些终端"一无所知，布局恢复、状态观测、回收都无从谈起。
 
-### 2.2 方案：attach 入口收到 Python，语义照搬 ttyd arg
+### 2.2 方案：attach 入口收口到 Python，语义照搬 ttyd arg
 
-state 的设计**借鉴 ttyd `arg` 的无中生有语义**：`/api/terminals/{id}/attach` 收到一个没见过的 id，就**当场登记一条 state**（等价于 `tmux new-session -A` 的"有则 attach、无则创建"），然后 302 到 ttyd。**每个面板就是一条 state**——面板打开的动作本身完成登记，前端无需先走一次显式创建。
+state 的设计**借鉴 ttyd `arg` 的无中生有语义**：attach 入口收到一个没见过的 URI，就规范化派生 id（[uri.md](uri.md) §4）并**当场登记一条 state**（等价于 `tmux new-session -A` 的"有则 attach、无则创建"），然后 302 到 ttyd。**每个面板就是一条 state**——面板打开的动作本身完成登记，前端无需先走一次显式创建。
 
 ```
-前端 Shell                    FastAPI                          ttyd
-   │ iframe.src =                │                               │
-   │  /api/terminals/term-3/attach                               │
-   │────────────────────────────▶│ 注册表有 term-3？              │
-   │                             │  ├─ 无 → 写 terminals/term-3.json（无中生有）
-   │                             │  └─ 有 → 更新 last_attached    │
-   │◀─302 /tty/?arg=term-3───────│                               │
-   │                             │                               │
-   │──(iframe 跟随 302)────────────────────────────────────────▶│ attach.sh → tmux
+前端 Shell                       FastAPI                            ttyd
+   │ iframe.src =                   │                                 │
+   │  /api/terminals/attach?uri=bash://main                           │
+   │───────────────────────────────▶│ 派生 id=bash-main，state 有？    │
+   │                                │  ├─ 无 → 写 terminals/bash-main.json（无中生有）
+   │                                │  └─ 有 → 更新 last_attached      │
+   │◀─302 /tty/?arg=bash-main───────│                                 │
+   │                                │                                 │
+   │──(iframe 跟随 302)──────────────────────────────────────────────▶│ attach.sh → tmux
 ```
 
-- iframe 的 `src` 永远指向 `/api/terminals/{id}/attach`，而不是 `/tty/` 本身；浏览器对 iframe 内的 302 会自动跟随，对前端完全透明；
+- iframe 的 `src` 永远指向 attach 入口（`/api/terminals/attach?uri=…`），而不是 `/tty/` 本身；浏览器对 iframe 内的 302 会自动跟随，对前端完全透明；
 - 无中生有发生在 Python 这一层，因此后端能看到**开了多少个面板、每个面板何时创建、最近一次被打开是什么时候**。
 
 ### 2.3 创建收口在 Python
@@ -119,7 +119,7 @@ exec tmux new-session -A -s "$1" -c /workspace
 
 - **写**：前端 Shell 在每次布局变更（分割/关闭/换应用/拖比例结束）后，**防抖 ~500ms** 调 `PUT /api/layout` 全量覆盖；`version` 单调递增，后端拒绝旧版本覆盖新版本（last-write-wins，防两个标签页互相打架时旧页面回写）；
 - **读**：Shell 启动时 `GET /api/layout` 还原整棵树；
-- **恢复零特判**：还原时每个 `terminal` 叶子照常把 iframe 指向 `/api/terminals/{id}/attach` 即可——tmux 现场还在则原样接上；会话已消亡（如容器重启）则由无中生有语义自动重建同名会话，块的位置与用途不变，只是 shell 现场从头开始；
+- **恢复零特判**：还原时每个终端类叶子照常把 iframe 指向 `/api/terminals/attach?uri=<叶子的 uri>` 即可——tmux 现场还在则原样接上；会话已消亡（如容器重启）则由无中生有语义自动重建同名会话，块的位置与用途不变，只是 shell 现场从头开始；
 - localStorage 不再承担布局存储，仅可留作断网时的临时兜底。
 
 | 端点 | 功能 |
@@ -134,7 +134,7 @@ Agent 会话**就是**一条 `kind: "agent"` 的终端注册项，复用同一�
 - Agent 块的 URI（`claude:///workspace/proj`、`codex:///…`，见 uri.md）走统一 attach 入口：派生 id、登记 state（记录 cwd 与命令模板）、以该 cwd 创建 tmux 会话并启动应用注册表中该 Agent 的命令；
 - design.md §3.5 的观测与交互接口（`input` / `output` / 状态）挂在同一 id 上：
   `POST /api/terminals/{id}/input`（`tmux send-keys`）、`GET /api/terminals/{id}/output`（`tmux capture-pane`）；
-- 前端 Agent 块的 iframe 同样指向 `/api/terminals/{id}/attach`——观察与接管是同一个块。
+- 前端 Agent 块的 iframe 同样指向统一 attach 入口——观察与接管是同一个块。
 
 ## 6. 多人协作
 
@@ -157,6 +157,6 @@ state 是共享单元，"打开"只是 attach、不是独占——多个客户�
 
 ## 9. 对 design.md 的影响清单
 
-- §3.2 / §3.6：终端与 Agent 块的 iframe 不再直拼 `/tty/?arg=…`，改为 `/api/terminals/{id}/attach`（302）；`attach.sh` 增加注册表校验；
+- §3.2 / §3.6：终端与 Agent 块的 iframe 不再直拼 `/tty/?arg=…`，改为 `/api/terminals/attach?uri=…`（302）；`attach.sh` 增加注册表校验；
 - §3.6：布局持久化从 localStorage 改为后端 `/api/layout`；
 - §3.5：Agent 会话 API 合并进终端 API（同一注册表，`kind: agent`）。

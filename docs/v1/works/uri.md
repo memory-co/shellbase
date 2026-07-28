@@ -17,19 +17,21 @@
 标准 URI 形态：`scheme://authority/path?query`。前端 Shell 持有解析器，把 URI 翻译成块内 iframe 的实际 `src`：
 
 ```
-                     ┌── https(www)  ──▶ 直接作为 iframe src（外链嵌入）
-                     ├── https(localhost) ─▶ /proxy/<port>/…（nginx 代理本地端口）
+                     ┌── https(www)  ──▶ /apps/browser?url=…（内层 iframe 直连外链）
+                     ├── https(localhost) ─▶ /apps/browser?url=…（内层经 /proxy/<port>/ 代理）
 块的 URI ──▶ 解析器 ──┼── file://     ──▶ /apps/files?path=…（文件浏览器）
                      ├── bash://     ──▶ /api/terminals/attach?uri=…（302 → ttyd）
                      └── claude:// codex:// … ─▶ 同上，Agent 终端
 ```
 
+https 类装载的是浏览器应用页（design.md §3.4：地址栏 + 内层 iframe），内层目标由 host 决定：外链直连、localhost 走 nginx 通配代理。
+
 ## 3. Scheme 一览
 
 | URI 示例 | 含义 | 解析结果 |
 |----------|------|----------|
-| `https://www.example.com/docs` | 外部网页 | 直接 iframe 嵌入该地址（受目标站 `X-Frame-Options` 限制，被拒时提示新窗口打开） |
-| `https://localhost:5173/` | 容器/本机上的 web 服务 | 经 nginx 通配代理 `/proxy/5173/` 访问——外部无需映射该端口，且同源、无嵌入限制 |
+| `https://www.example.com/docs` | 外部网页 | 浏览器应用打开，内层 iframe 直连该地址（受目标站 `X-Frame-Options` 限制，被拒时提示新窗口打开） |
+| `https://localhost:5173/` | 容器/本机上的 web 服务 | 浏览器应用打开，内层经 nginx 通配代理 `/proxy/5173/` 访问——外部无需映射该端口，且同源、无嵌入限制 |
 | `file:///workspace/src` | 本地目录 | 文件浏览器应用定位到该目录（文件树） |
 | `file:///workspace/src/main.py` | 本地文件 | 文件浏览器应用直接打开该文件（编辑器） |
 | `bash://main` | 本地 bash 终端 | 终端会话，state id 派生自 URI → `302 /tty/?arg=<id>` |
@@ -58,6 +60,10 @@ codex:///workspace/myproj         →  codex-workspace-myproj
 codex:///workspace/myproj?tab=2   →  codex-workspace-myproj-2
 ```
 
+- 后端 `GET /api/terminals/attach?uri=<encoded>`：规范化 → 派生 id → 查 state，**无则登记**（state 文件记录原始 URI、cwd、启动命令）→ `302 /tty/?arg=<id>`；
+- 于是"重入"就是把同一个 URI 再解析一遍：现场还在则原样接上；容器重启后现场消亡，也能凭 state 里的 URI 重建出同目录、同命令的会话；
+- 同一 URI 被多个客户端同时打开 = 共享同一现场（collab.md）。
+
 ### 4.1 同路径多实例：`tab` 参数
 
 确定性映射带来一个必须回答的问题：**同一个目录要起两个 Codex 怎么办？**——`codex:///workspace/myproj` 打开第二次只会 attach 回第一个 tmux 会话（这正是重入语义，默认行为是对的：复用而不是起重）。
@@ -69,13 +75,7 @@ codex:///workspace/myproj?tab=2   →  codex-workspace-myproj-2
 - 前端应用选择器负责体验：构造 URI 时发现同路径已有存活实例，提示"接入现有会话 / 新开一个"，选后者则自动取最小空闲 `tab` 值；
 - `tab` 是身份的一部分，会随 URI 存进布局、参与分享与重入——`?tab=2` 的块刷新后回到的还是 2 号现场。
 
-复用问题**只存在于终端类 scheme**（`bash://`、`claude://`、`codex://` 及扩展的 `terminal` 型）——因为它们背后是 tmux 会话这份持久现场。`file://`、`https://` 类是无状态引用：同一 URI 开多个块就是各自独立加载，天然不冲突，也就没有 `tab` 的概念。
-
-- 后端 `GET /api/terminals/attach?uri=<encoded>`：规范化 → 派生 id → 查 state，**无则登记**（state 文件记录原始 URI、cwd、启动命令）→ `302 /tty/?arg=<id>`；
-- 于是"重入"就是把同一个 URI 再解析一遍：现场还在则原样接上；容器重启后现场消亡，也能凭 state 里的 URI 重建出同目录、同命令的会话；
-- 同一 URI 被多个客户端同时打开 = 共享同一现场（collab.md）。
-
-`file://` 与 `https://` 类是无状态引用，不产生终端 state，重入即重新加载。
+复用问题**只存在于终端类 scheme**（`bash://`、`claude://`、`codex://` 及扩展的 `terminal` 型）——因为它们背后是 tmux 会话这份持久现场。`file://`、`https://` 类是无状态引用：不产生终端 state，同一 URI 开多个块就是各自独立加载，重入即重新加载，天然不冲突，也就没有 `tab` 的概念。
 
 ## 5. 与布局、分享的关系
 

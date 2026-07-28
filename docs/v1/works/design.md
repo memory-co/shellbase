@@ -48,7 +48,7 @@ shellbase = **在任意 VM 上一条 `docker run` 拉起的 Web 工作台**，�
                         │        │                                                           │
                         │        ├── /api/…       → FastAPI   127.0.0.1:8000                 │
                         │        │                  ├─ 文件管理 API                           │
-                        │        │                  ├─ Agent 会话管理                         │
+                        │        │                  ├─ 终端/Agent 会话 + 布局状态              │
                         │        │                  └─ auth_request 鉴权端点                  │
                         │        │                                                           │
                         │        └── /tty/…       → ttyd      127.0.0.1:7681  (WebSocket)   │
@@ -86,7 +86,7 @@ shellbase = **在任意 VM 上一条 `docker run` 拉起的 Web 工作台**，�
 - 启动时通过环境变量 `SHELLBASE_TOKEN` 注入访问令牌（不设置则启动时随机生成并打印到容器日志）；
 - 前端登录页把 token 写入 Cookie（`HttpOnly` 由 FastAPI 下发）；
 - nginx 对 `/tty/`、`/api/` 一律走 `auth_request /api/auth/verify`，由 FastAPI 校验 Cookie/Header 中的 token；
-- 静态资源放行，`/api/auth/login` 放行。
+- 静态资源、`/api/auth/login`、`/api/system/health`（Docker 健康检查）放行。
 
 这样 ttyd 自身不需要感知认证，鉴权收敛在一处。
 
@@ -102,7 +102,7 @@ shellbase = **在任意 VM 上一条 `docker run` 拉起的 Web 工作台**，�
 - `attach.sh` 逻辑：`tmux new-session -A -s main -c /workspace`——存在则 attach，不存在则创建；
 - 前端**直接以 iframe 装载 ttyd 自带页面**（配合 3.6 的分割布局，终端就是一种可放进块里的应用），不自研终端渲染层；
 - 多终端：URL query 传 `?arg=<session>`，`attach.sh` 据此 attach 不同 tmux 会话——每个终端块一个会话；
-- **会话经 Python 收口**：终端块的 iframe 不直接指向 `/tty/`，而是指向 `/api/terminals/{id}/attach`——FastAPI 借鉴 ttyd `arg` 的语义支持**无中生有**（没见过的 id 当场登记一条 state，每个面板就是一条 state），再 302 到 `/tty/?arg=<id>`；而底下的终端层不允许无中生有：`attach.sh` 只对已有 state 的会话执行 `tmux new-session -A`。因此后端始终掌握全部打开中的面板（详见 [backend.md](backend.md)）。
+- **会话经 Python 收口**：终端块的 iframe 不直接指向 `/tty/`，而是指向 `/api/terminals/attach?uri=<块的 URI>`——FastAPI 借鉴 ttyd `arg` 的语义支持**无中生有**（没见过的 URI 当场派生 id、登记一条 state，每个面板就是一条 state），再 302 到 `/tty/?arg=<id>`；而底下的终端层不允许无中生有：`attach.sh` 只对已有 state 的会话执行 `tmux new-session -A`。因此后端始终掌握全部打开中的面板（详见 [backend.md](backend.md) 与 [uri.md](uri.md)）。
 
 选 tmux 而不是裸 pty 的理由：断线重连不丢现场、Agent 长任务不因刷新页面而中断、天然支持多会话，并且 Agent 的输出历史可以通过 `tmux capture-pane` 被 API 读取。
 
@@ -113,13 +113,15 @@ shellbase = **在任意 VM 上一条 `docker run` 拉起的 Web 工作台**，�
 ```
 app/
 ├── main.py              # FastAPI 实例、路由挂载、启动钩子
-├── auth.py              # /api/auth/login, /api/auth/verify (供 nginx auth_request)
+├── auth.py              # /api/auth/{login,verify,logout,me}（verify 供 nginx auth_request）
 ├── files.py             # 文件管理
 ├── terminals.py         # 终端会话注册表 + 302 attach + Agent 会话（见 backend.md）
-├── layout.py            # 页面布局树的读写（见 backend.md）
+├── layout.py            # 页面布局树的读写 + watch 广播（见 backend.md / collab.md）
 ├── state.py             # 文件系统状态存储（原子写、对账、回收）
-└── system.py            # /api/system/info: CPU/内存/磁盘/版本
+└── system.py            # /api/system/{info,health} + /api/apps 应用注册表
 ```
+
+完整的接口定义（请求/响应/错误码）见 [../api/](../api/README.md)。
 
 后端是**全局状态的唯一权威**：终端注册表、页面布局、Agent 会话全部以文件系统持久化在
 `SHELLBASE_STATE_DIR`（默认 `/workspace/.shellbase/state`），用户换设备或容器重启后仍能恢复
@@ -132,7 +134,7 @@ app/
 | `GET  /api/files/tree?path=` | 目录列表（名称、类型、大小、mtime、权限） |
 | `GET  /api/files/content?path=` | 读文件（文本直出；二进制/超限返回元信息） |
 | `PUT  /api/files/content` | 写文件（带 mtime 乐观锁，防覆盖终端里的并发修改） |
-| `POST /api/files/upload` | 分片/流式上传 |
+| `POST /api/files/upload` | multipart 上传（上限 1GB，与 nginx `client_max_body_size` 对齐） |
 | `GET  /api/files/download?path=` | 下载（目录自动打 zip） |
 | `POST /api/files/mkdir` / `move` / `delete` | 常规操作 |
 | `WS   /api/files/watch` | inotify（watchfiles 库）推送变更，前端文件树实时刷新 |
@@ -159,9 +161,9 @@ app/
 v1 的 Agent 模型是「**运行在 tmux 会话里的 CLI Agent 进程**」，平台负责拉起、观测、交互，不重新发明 Agent 运行时：
 
 - Agent 会话就是一条 `kind: agent` 的终端注册项（复用 backend.md 的注册/attach/回收机制）：
-  `POST /api/terminals {agent: "claude"}` 创建 tmux 会话并启动该 Agent 的命令
+  Agent 块的 URI（如 `claude:///workspace/proj`）经统一 attach 入口无中生有——登记 state、以 path 为 cwd 创建 tmux 会话并启动该 Agent 的命令
   （命令模板来自应用注册表：内置 `claude`、`codex` 等，可经 `SHELLBASE_APPS_EXTRA` 扩展，见 3.6）；
-- `GET /api/terminals`：列出会话及状态（running / idle / exited，通过 tmux pane 的存活 + 前台进程判断）；
+- `GET /api/terminals`：列出会话及状态（alive / exited，另以 `kind: external` 标记手工创建的 tmux 会话，见 backend.md §7）；
 - `POST /api/terminals/{id}/input`：向会话注入文本（`tmux send-keys`），用于程序化下发任务；
 - `GET /api/terminals/{id}/output`：`tmux capture-pane` 抓取最近输出；
 - Agent 应用块（如 Claude Code、Codex）装载的就是该 tmux 会话的终端——因此"观察 Agent"和"接管操作"是同一个块，无需切换。
@@ -197,8 +199,8 @@ Agent 与文件/浏览器的融合点：Agent 在终端里跑，工作目录就�
 |------|-----|------|
 | `bash://main` | 终端 | `/api/terminals/attach?uri=…` → 302 到 ttyd 页面（无中生有，见 backend.md） |
 | `file:///workspace/src` | 文件浏览器 | `/apps/files?path=…`（文件树 + CodeMirror 6 编辑器 + 上传下载，经 `/api/files/watch` 实时刷新） |
-| `https://www.example.com` | 浏览器（外链） | 直接作为 iframe src（见 3.4） |
-| `https://localhost:5173` | 浏览器（本地服务） | nginx 通配代理 `/proxy/5173/`，同源无嵌入限制 |
+| `https://www.example.com` | 浏览器（外链） | `/apps/browser?url=…`，内层 iframe 直连（见 3.4） |
+| `https://localhost:5173` | 浏览器（本地服务） | `/apps/browser?url=…`，内层经 nginx 通配代理 `/proxy/5173/`，同源无嵌入限制 |
 | `claude:///workspace/proj`、`codex:///…` | Agent | Agent 终端：cwd 为 path、启动对应命令，同经 attach 入口 |
 
 **应用注册表**：内置上表 scheme；通过 `SHELLBASE_APPS_EXTRA`（JSON）注册新 scheme——`terminal` 型（命令模板）或 `url` 型（地址改写）——即可追加自定义 Agent 或任意 web 应用，无需改前端代码。
@@ -263,7 +265,7 @@ docker run -d --name shellbase \
 shellbase 本质上是"授权的远程 shell"，安全边界必须清晰：
 
 1. **单一入口**：只有 nginx 端口对外；ttyd、FastAPI 全部绑定 loopback；
-2. **强制 token**：nginx `auth_request` 覆盖所有动态路由，未认证只能看到登录页；token 比较用常量时间比较；连续失败限速（FastAPI 内存计数即可）；
+2. **强制 token**：nginx `auth_request` 覆盖所有动态路由，未认证只能看到登录页；token 比较用常量时间比较；登录接口 nginx 层限速（同 IP 60s 内 10 次，见 api/auth.md）；
 3. **传输加密**：文档明确告知——公网部署必须在外层套 TLS（云 LB / caddy / 反代），或 `-v` 挂证书启用容器内 HTTPS（v1.1 再做）；
 4. **文件 API 越权防护**：所有路径 `resolve()` 后必须以 workspace 根为前缀，否则 403；符号链接解析后同样受此约束；
 5. **能力自觉**：终端本身就是全量 shell，因此文件 API 不需要也不假装做比 shell 更细的权限控制——安全模型是"拿到 token 即拥有容器"，边界靠容器隔离（建议部署时不加 `--privileged`，按需挂载目录）；
@@ -302,7 +304,7 @@ shellbase/
 | M1 骨架 | Dockerfile + supervisord + nginx + ttyd(tmux) + FastAPI 健康检查 + token 鉴权 + 分割布局 Shell（终端应用可装块） | 一条 docker run 后登录，任意分割布局并在多个块中使用持久终端 |
 | M2 文件 | 文件 API 全套 + 文件浏览器应用（树/编辑器/上传下载） | 终端改文件 ⇄ 文件块实时可见、可编辑 |
 | M3 浏览器 | 浏览器应用（地址栏/历史/URL 恢复）+ 布局持久化 | 终端块起 dev server，旁边浏览器块预览；刷新页面布局原样恢复 |
-| M4 Agent | Agent 会话 API + Claude Code / Codex 应用接入选择器 | 空白块选择 Claude Code 即启动会话，可下发任务、直接接管 |
+| M4 Agent | Agent 会话 API + Claude Code / Codex 应用接入启动页 | 空白块（启动页）选择 Claude Code 即启动会话，可下发任务、直接接管 |
 | M5 打磨 | 断线重连、限流、日志、system info、文档 | 30 分钟断网重连后现场无损 |
 
 ## 8. 主要技术决策记录（ADR 摘要)
@@ -311,4 +313,4 @@ shellbase/
 2. **浏览器面板用纯前端 iframe，而非容器内 Chromium（CDP/noVNC）**：容器不跑浏览器进程，镜像小、实现简单、零额外资源开销。代价是设置了 `X-Frame-Options`/`frame-ancestors` 的外部站点无法嵌入——v1 的主场景是预览容器内 web 服务，可接受；若后续需要 Agent 驱动的真实浏览器，再引入 headless Chromium 作为 v2 能力。
 3. **supervisord 而非 s6/多容器 compose**："单 Dockerfile 拉起"是硬需求，排除 compose；supervisord 配置直观、python 生态一致。
 4. **鉴权收敛到 nginx auth_request**：ttyd/静态资源无需各自实现认证，未来换认证方式只改一处。
-5. **前端采用"分割布局 Shell + iframe 应用"而非单体 SPA**：组合能力放在布局层（任意分割、每块自选应用），应用本身只是 URL——终端直接复用 ttyd 自带页面，零终端渲染代码；应用彼此隔离、可独立开发、可通过配置扩展（新增一个 Agent 只是注册一条命令模板）。代价是跨块联动（如文件树点击在编辑器块打开）需要经 Shell 层 postMessage 中转，v1 仅实现最小联动。
+5. **前端采用"分割布局 Shell + iframe 应用"而非单体 SPA**：组合能力放在布局层（任意分割、每块自选应用），应用本身只是 URI——终端直接复用 ttyd 自带页面，零终端渲染代码；应用彼此隔离、可独立开发、可通过配置扩展（新增一个 Agent 只是注册一条命令模板）。代价是跨块联动（如文件树点击在编辑器块打开）需要经 Shell 层 postMessage 中转，v1 仅实现最小联动。
