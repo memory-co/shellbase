@@ -16,7 +16,7 @@ tmux 的协作哲学是：会话（现场）独立于客户端存在，客户端
 
 ## 2. 终端共享：tmux 天然给的
 
-同一个 session id 被 N 个浏览器块 attach 时，每个 ttyd 连接各自执行 `attach.sh` → `tmux new-session -A` 挂到**同一个 tmux 会话**：输出对所有客户端实时镜像，任何一方都能输入。这就是 tmux 原生的结对模式，后端零额外工作。
+同一 window 的同一终端 URI 被 N 个浏览器块 attach 时，每个 ttyd 连接各自执行 `attach.sh` → `tmux new-session -A` 挂到**同一个 tmux 会话**：输出对所有客户端实时镜像，任何一方都能输入。这就是 tmux 原生的结对模式，后端零额外工作。（会话身份 = (window, URI)，见 uri.md §4——协作的入口就是进入同一个 window。）
 
 两个需要显式定的策略：
 

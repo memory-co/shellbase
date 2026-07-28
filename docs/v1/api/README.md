@@ -19,12 +19,11 @@ FastAPI 提供的全部 HTTP/WS 接口。设计依据见 [works/design.md](../wo
 | | `GET  /api/auth/verify` | nginx auth_request 内部校验 |
 | | `POST /api/auth/logout` | 登出清 Cookie |
 | | `GET  /api/auth/me` | 登录态探测 |
-| [terminals](terminals.md) | `GET /api/terminals/attach?uri=` | 唯一 attach 入口：按 URI（无中生有 + 302，id 派生是后端内部细节） |
-| | `GET  /api/terminals` | 会话列表（state ∪ tmux） |
-| | `POST /api/terminals` | 匿名会话显式创建 |
-| | `DELETE /api/terminals/{id}` | 销毁会话 |
-| | `POST /api/terminals/{id}/input` | 注入输入（Agent 下发任务） |
-| | `GET  /api/terminals/{id}/output` | 抓取输出 |
+| [terminals](terminals.md) | `GET /api/windows/{wid}/terminals/attach?uri=` | 唯一 attach 入口：会话身份 = (window, URI)，无中生有 + 302 |
+| | `GET  /api/terminals?window=` | 全局会话观测（state ∪ tmux，可按 window 过滤） |
+| | `DELETE /api/windows/{wid}/terminals?uri=` | 销毁会话（关闭块的标准动作） |
+| | `POST /api/windows/{wid}/terminals/input?uri=` | 注入输入（Agent 下发任务） |
+| | `GET  /api/windows/{wid}/terminals/output?uri=` | 抓取输出 |
 | [windows](windows.md) | `GET /api/windows` | window 列表（每张页面一个 window，状态存后端） |
 | | `GET  /api/windows/{id}` | 读布局树（未知 id 无中生有） |
 | | `PUT  /api/windows/{id}` | 写布局树（version 乐观锁） |

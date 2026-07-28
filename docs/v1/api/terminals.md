@@ -1,12 +1,14 @@
 # Terminals API
 
-设计背景：[works/backend.md](../works/backend.md) §2（无中生有 + 302 attach）、[works/uri.md](../works/uri.md)（URI → state id 派生）、[works/collab.md](../works/collab.md)（共享/只读）。
+设计背景：[works/backend.md](../works/backend.md) §2（无中生有 + 302 attach）、[works/uri.md](../works/uri.md)（URI 语义）、[works/collab.md](../works/collab.md)（共享/只读）。
+
+**标识模型**：终端是 window 的子资源，**会话身份 = (window, URI)**——URI 在其所属 window 内唯一（同 window 重开同一 URI 是重入，`?tab` 区分并行实例）；同一 URI 出现在不同 window 里是**互不相干的两个现场**。API 面上没有派生 id：管理端点一律用 `window` + `uri` 定位，后端内部的 tmux 会话名（302 目标 `/tty/?arg=<内部名>` 中可见）只是实现细节。
 
 会话对象（响应中的 `terminal` 结构）：
 
 ```json
 {
-  "id": "codex-workspace-myproj-2",
+  "window": "main",
   "uri": "codex:///workspace/myproj?tab=2",
   "kind": "agent",                  // plain | agent | external
   "cwd": "/workspace/myproj",
@@ -18,11 +20,11 @@
 }
 ```
 
-## GET /api/terminals/attach?uri=&mode=
+## GET /api/windows/{wid}/terminals/attach?uri=&mode=
 
-**主入口**。iframe 的 src 指向这里，不直接指向 `/tty/`。
+**唯一 attach 入口**。iframe 的 src 指向这里，不直接指向 `/tty/`。
 
-**适配层在本端点**：前端只做四类分流（本地服务 / 外部站点 / `file://` / 其余未知），凡未知 scheme 一律盲转发到这里——scheme 是否合法、映射到什么命令（scheme 名即命令名 / 注册表别名）、命令是否存在，全部由本端点裁决（uri.md §2、§3.1）。前端不维护终端 scheme 名单。
+**适配层在本端点**：前端只做四类分流（本地服务 / 外部站点 / `file://` / 其余未知），凡未知 scheme 一律盲转发到这里——scheme 是否合法、映射到什么命令（scheme 名即命令名 / 注册表别名）、命令是否存在，全部由本端点裁决（uri.md §2、§3.1）。前端不维护终端 scheme 名单，也不感知重入与内部会话名。
 
 | 参数 | 说明 |
 |------|------|
@@ -31,42 +33,31 @@
 
 行为：
 
-1. 规范化 URI → 确定性派生 state id（uri.md §4）；
-2. state 不存在：**无中生有**——写入 state 文件（记录原始 URI/cwd/cmd）；Agent 类同时预创建 tmux 会话并拉起命令。例外：`mode=ro` 时不创建，返回 `404 {"error":"no_such_session"}`；
-3. state 已存在：更新 `last_attached`；若 tmux 会话已消亡（status=exited），按 state 记录的 cwd/cmd 重建；
-4. `302 Location: /tty/?arg=<id>`（`mode=ro` 时附加只读参数）。
+1. 规范化 URI（uri.md §4），以 `(wid, uri)` 查 state；
+2. 不存在：**无中生有**——写入 state 文件（记录 window、原始 URI、cwd、cmd）；带 cwd/命令的会话同时预创建 tmux 会话并拉起命令。例外：`mode=ro` 时不创建，返回 `404 {"error":"no_such_session"}`；
+3. 已存在：更新 `last_attached`；若 tmux 会话已消亡（status=exited），按 state 记录的 cwd/cmd 重建；
+4. `302 Location: /tty/?arg=<内部会话名>`（`mode=ro` 时附加只读参数）。
 
-attach 是**唯一入口**，且只按 URI：前端不感知"URI → id"的派生与重入，这些完全由后端控制。id 只是后端的内部产物，仅出现在列表对象和管理端点（DELETE / input / output）的路径里。
+`wid` 未知时先无中生有该 window（windows.md），再执行上述流程。
 
-## GET /api/terminals
+## GET /api/terminals?window=
 
-列表：state ∪ `tmux ls` 的合并视图（顺带触发一次对账，backend.md §7）。
+全局观测视图：state ∪ `tmux ls` 的合并（顺带触发一次对账，backend.md §7）；`window` 参数可选，过滤单个 window。
 
 ```json
 { "terminals": [ { ...terminal }, ... ] }
 ```
 
-- 用户在终端里手工 `tmux new` 的会话以 `kind: "external"` 出现，仅展示，不参与布局恢复；
-- 启动页用本端点为 recents 条目标注存活圆点（launcher.md §3.2）。
+- 用户在终端里手工 `tmux new` 的会话以 `kind: "external"` 出现（无 window/uri），仅展示，不参与恢复；
+- 启动页用 `?window=<当前>` 为 recents 条目标注存活圆点（launcher.md §3.2）。
 
-## POST /api/terminals
+## DELETE /api/windows/{wid}/terminals?uri=
 
-显式创建匿名会话（不常用，URI 入口是主路径）：
+销毁会话：`tmux kill-session` + 删除 state 文件 → `204`。不存在 → `404`。正被其他客户端 attach 时同样执行（tmux 会把所有客户端踢出），前端在 `clients > 1` 时应二次确认。
 
-```json
-// 请求（body 可为空）
-{}
-// 201 响应：等价于 bash://?tab=<最小空闲值>
-{ "id": "bash-workspace-4", "uri": "bash://?tab=4", "attach_url": "/api/terminals/attach?uri=bash%3A%2F%2F%3Ftab%3D4" }
-```
+这是**用户在网页上关闭终端块的标准动作**：Shell 关闭块时先调本端点销毁会话，再 `PUT /api/windows/{wid}` 移除叶子——"关闭即销毁"，与 attach 的"打开即登记"对称。会话身份含 window，因此**不存在跨 window 引用问题**：删就是删，无需检查别的 window。
 
-## DELETE /api/terminals/{id}
-
-`tmux kill-session` + 删除 state 文件 → `204`。会话不存在 → `404`。正被其他客户端 attach 时同样执行（tmux 会把所有客户端踢出），前端在 `clients > 1` 时应二次确认。
-
-这是**用户在网页上关闭终端块的标准动作**：Shell 关闭块时先调本端点销毁会话，再 `PUT /api/windows/{id}` 移除叶子——"关闭即销毁"，与 attach 的"打开即登记"对称（backend.md §4.2）。注意：若该会话的 URI 同时出现在其他 window 中，Shell 应跳过 DELETE 只改布局（判断依据：`GET /api/terminals` 返回的会话对照各 window，或简化为删除前确认）。
-
-## POST /api/terminals/{id}/input
+## POST /api/windows/{wid}/terminals/input?uri=
 
 向会话注入输入（程序化给 Agent 下发任务）：
 
@@ -77,12 +68,12 @@ attach 是**唯一入口**，且只按 URI：前端不感知"URI → id"的派�
 - `tmux send-keys` 实现；`enter: true`（默认）时末尾追加回车；
 - `204`；会话不存在或已 exited → `404` / `409 {"error":"session_exited"}`。
 
-## GET /api/terminals/{id}/output?lines=200
+## GET /api/windows/{wid}/terminals/output?uri=&lines=200
 
 抓取会话最近输出（`tmux capture-pane -p`）：
 
 ```json
-{ "id": "claude-workspace-myproj", "lines": 200, "output": "...终端文本..." }
+{ "window": "main", "uri": "claude:///workspace/myproj", "lines": 200, "output": "...终端文本..." }
 ```
 
 `lines` 默认 200，上限 5000。用于程序化观测 Agent 进展；人看直接 attach 块即可。

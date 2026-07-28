@@ -65,7 +65,7 @@ window 对象：递归二叉分割的布局树，叶子只存块的 URI（uri.md
 
 删除 window。执行顺序：
 
-1. 对树中每个终端类叶子按"关闭即销毁"处理——但**仅当该会话不被其他 window 的叶子引用**时才 `kill-session` + 删 state（同一 URI 可能出现在多个 window 上）；
+1. 对该 window 的全部终端会话按"关闭即销毁"处理（`kill-session` + 删 state）——会话身份含 window，同一 URI 在别的 window 是独立现场，**无跨 window 引用问题**，删就是删；
 2. 删除 window 文件，向该 window 的 `watch` 广播 `{"type":"window_deleted"}`（正在此 window 的客户端跳回 `main`）。
 
 `main` 不可删除（`400 {"error":"cannot_delete_main"}`）；不存在 → `404`。

@@ -102,7 +102,7 @@ shellbase = **在任意 VM 上一条 `docker run` 拉起的 Web 工作台**，�
 - `attach.sh` 逻辑：`tmux new-session -A -s main -c /workspace`——存在则 attach，不存在则创建；
 - 前端**直接以 iframe 装载 ttyd 自带页面**（配合 3.6 的分割布局，终端就是一种可放进块里的应用），不自研终端渲染层；
 - 多终端：URL query 传 `?arg=<session>`，`attach.sh` 据此 attach 不同 tmux 会话——每个终端块一个会话；
-- **会话经 Python 收口**：终端块的 iframe 不直接指向 `/tty/`，而是指向 `/api/terminals/attach?uri=<块的 URI>`——FastAPI 借鉴 ttyd `arg` 的语义支持**无中生有**（没见过的 URI 当场派生 id、登记一条 state，每个面板就是一条 state），再 302 到 `/tty/?arg=<id>`；而底下的终端层不允许无中生有：`attach.sh` 只对已有 state 的会话执行 `tmux new-session -A`。因此后端始终掌握全部打开中的面板（详见 [backend.md](backend.md) 与 [uri.md](uri.md)）。
+- **会话经 Python 收口**：终端块的 iframe 不直接指向 `/tty/`，而是指向 `/api/windows/{wid}/terminals/attach?uri=<块的 URI>`——FastAPI 借鉴 ttyd `arg` 的语义支持**无中生有**（没见过的 `(window, URI)` 当场登记一条 state，每个面板就是一条 state），再 302 到 ttyd；而底下的终端层不允许无中生有：`attach.sh` 只对已有 state 的会话执行 `tmux new-session -A`。会话身份 = (window, URI)，后端始终掌握每个 window 打开中的全部面板（详见 [backend.md](backend.md) 与 [uri.md](uri.md)）。
 
 选 tmux 而不是裸 pty 的理由：断线重连不丢现场、Agent 长任务不因刷新页面而中断、天然支持多会话，并且 Agent 的输出历史可以通过 `tmux capture-pane` 被 API 读取。
 
@@ -164,8 +164,8 @@ v1 的 Agent 模型是「**运行在 tmux 会话里的 CLI Agent 进程**」，�
   Agent 块的 URI（如 `claude:///workspace/proj`）经统一 attach 入口无中生有——登记 state、以 path 为 cwd 创建 tmux 会话并启动该 Agent 的命令
   （命令模板来自应用注册表：内置 `claude`、`codex` 等，可经 `SHELLBASE_APPS_EXTRA` 扩展，见 3.6）；
 - `GET /api/terminals`：列出会话及状态（alive / exited，另以 `kind: external` 标记手工创建的 tmux 会话，见 backend.md §7）；
-- `POST /api/terminals/{id}/input`：向会话注入文本（`tmux send-keys`），用于程序化下发任务；
-- `GET /api/terminals/{id}/output`：`tmux capture-pane` 抓取最近输出；
+- `POST /api/windows/{wid}/terminals/input?uri=`：向会话注入文本（`tmux send-keys`），用于程序化下发任务；
+- `GET /api/windows/{wid}/terminals/output?uri=`：`tmux capture-pane` 抓取最近输出；
 - Agent 应用块（如 Claude Code、Codex）装载的就是该 tmux 会话的终端——因此"观察 Agent"和"接管操作"是同一个块，无需切换。
 
 Agent 与文件/浏览器的融合点：Agent 在终端里跑，工作目录就是 `/workspace`（与文件浏览器应用同源）；Agent 起的 web 服务（dev server 等），用户在旁边的浏览器块里输入地址即可预览——同屏分割布局让"Agent 改代码 → 看效果"零切换。
@@ -197,7 +197,7 @@ Agent 与文件/浏览器的融合点：Agent 在终端里跑，工作目录就�
 
 | 块 URI 示例 | 应用 | 解析为 |
 |------|-----|------|
-| `bash:///workspace/proj` | 终端 | `/api/terminals/attach?uri=…` → 302 到 ttyd 页面（无中生有，见 backend.md） |
+| `bash:///workspace/proj` | 终端 | `/api/windows/{wid}/terminals/attach?uri=…` → 302 到 ttyd 页面（无中生有，见 backend.md） |
 | `file:///workspace/src` | 文件浏览器 | `/apps/files?path=…`（文件树 + CodeMirror 6 编辑器 + 上传下载，经 `/api/files/watch` 实时刷新） |
 | `https://www.example.com` | 浏览器（外链） | `/apps/browser?url=…`，内层 iframe 直连（见 3.4） |
 | `https://localhost:5173` | 浏览器（本地服务） | `/apps/browser?url=…`，内层经 nginx 通配代理 `/proxy/5173/`，同源无嵌入限制 |

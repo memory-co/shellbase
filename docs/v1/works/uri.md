@@ -20,7 +20,7 @@
                        ┌── https(localhost) ─▶ /apps/browser?url=…（本地服务，内层经 /proxy/<port>/ 代理）
                        ├── https(其余 host) ─▶ /apps/browser?url=…（外部站点，内层 iframe 直连）
 块的 URI ──▶ 前端四分流 ┼── file://          ─▶ /apps/files?path=…（文件浏览器）
-                       └── 其余一切（未知）  ─▶ /api/terminals/attach?uri=…（盲转发，302 → ttyd）
+                       └── 其余一切（未知）  ─▶ /api/windows/{wid}/terminals/attach?uri=…（盲转发，302 → ttyd）
 ```
 
 关键设计：**前端不维护任何终端 scheme 名单**。`bash://`、`claude://`、`vim://`、注册表别名……在前端眼里都是"未知"，一律原样转发给 terminals API，由后端完成 scheme → 命令的适配与合法性裁决（§3.1，错误码见 api/terminals.md）。好处是新增 CLI、加别名、改注册表都不需要前端发版。
@@ -61,25 +61,25 @@ htop://                        →  cd /workspace && htop
 - **这不是新增权限**：能开 `bash://` 的人本来就能运行任意命令，scheme 只是把"到哪个目录、跑哪个命令"编码进了定位符，能力边界与 design.md §5"能力自觉"一致；
 - `bash://` 与其他命令**完全同构**：`bash:///workspace/proj` = `cd /workspace/proj && bash`，没有任何特例。
 
-## 4. 重入：URI → state id 的确定性映射
+## 4. 重入：会话身份 = (window, URI)
 
-终端类 URI 规范化后，确定性地派生 state id。query 参数分两类：
+终端类 URI 的唯一性作用域是它**所属的 window**：同一 window 内，同一规范化 URI 就是同一现场（重开即重入）；同一 URI 出现在不同 window 里，是互不相干的两个现场。query 参数分两类：
 
-- **身份参数**（参与派生，不同值 = 不同现场）：目前只有 `tab`；
-- **非身份参数**（派生前剔除，只影响本次打开方式）：如 `mode=ro`。
+- **身份参数**（参与身份，不同值 = 不同现场）：目前只有 `tab`；
+- **非身份参数**（判定身份前剔除，只影响本次打开方式）：如 `mode=ro`。
 
-规范化规则：scheme 小写、路径去尾斜杠、剔除非身份参数、`tab=1` 视为缺省并省略。
+规范化规则：scheme 小写、路径去尾斜杠、剔除非身份参数、`tab=1` 视为缺省并省略。后端由 `(window, 规范化 URI)` 确定性派生**内部会话名**（tmux 会话名，纯实现细节，前端不感知）：
 
 ```
-bash://                           →  bash-workspace（path 缺省 = /workspace）
-claude:///workspace/myproj        →  claude-workspace-myproj（超长或含特殊字符时取 slug + 短哈希）
-codex:///workspace/myproj         →  codex-workspace-myproj
-codex:///workspace/myproj?tab=2   →  codex-workspace-myproj-2
+(main,   bash://)                          →  main--bash-workspace（path 缺省 = /workspace）
+(main,   claude:///workspace/myproj)       →  main--claude-workspace-myproj（超长/特殊字符取 slug + 短哈希）
+(main,   codex:///workspace/myproj?tab=2)  →  main--codex-workspace-myproj-2
+(review, codex:///workspace/myproj)        →  review--codex-workspace-myproj（与 main 中的互不相干）
 ```
 
-- 后端 `GET /api/terminals/attach?uri=<encoded>`：规范化 → 派生 id → 查 state，**无则登记**（state 文件记录原始 URI、cwd、启动命令）→ `302 /tty/?arg=<id>`；
-- 于是"重入"就是把同一个 URI 再解析一遍：现场还在则原样接上；容器重启后现场消亡，也能凭 state 里的 URI 重建出同目录、同命令的会话；
-- 同一 URI 被多个客户端同时打开 = 共享同一现场（collab.md）。
+- 后端 `GET /api/windows/{wid}/terminals/attach?uri=<encoded>`：规范化 → 查 `(wid, uri)` 的 state，**无则登记**（state 记录 window、原始 URI、cwd、启动命令）→ `302 /tty/?arg=<内部会话名>`；
+- 于是"重入"就是在同一 window 里把同一个 URI 再解析一遍：现场还在则原样接上；容器重启后现场消亡，也能凭 state 重建出同目录、同命令的会话；
+- 同一 window 的同一 URI 被多个客户端同时打开 = 共享同一现场（collab.md）。
 
 ### 4.1 同路径多实例：`tab` 参数
 
@@ -97,7 +97,7 @@ codex:///workspace/myproj?tab=2   →  codex-workspace-myproj-2
 ## 5. 与布局、分享的关系
 
 - 布局树（`windows/<id>.json`）的叶子只存 `{"type": "leaf", "uri": "..."}`——URI 是块的全部持久化内容（backend.md §4）；
-- Shell 支持 deep link：`/#open=<encoded-uri>` 进入时自动在新块打开该 URI；块上提供"复制定位符"，把 URI 发给协作者即可让对方打开同一现场；
+- Shell 支持 deep link：`/#w/<wid>?open=<encoded-uri>` 进入指定 window 并在新块打开该 URI；块上提供"复制定位符"（window + URI），发给协作者即可让对方进入同一 window、打开同一现场——身份含 window，只分享 URI 而进了别的 window，得到的是独立现场；
 - 应用选择器本质是 URI 构造器：选"Codex" + 选目录 = 生成 `codex:///workspace/myproj`。
 
 ## 6. 注册表的角色（可选增强，不是准入门槛）
