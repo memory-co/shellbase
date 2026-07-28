@@ -39,6 +39,7 @@ COPY deploy/tmux.conf /etc/tmux.conf
 
 RUN mkdir -p /opt/shellbase/run /workspace \
     && chmod +x /opt/shellbase/bin/attach.sh /opt/shellbase/deploy/entrypoint.sh \
+                /opt/shellbase/deploy/start-nginx.sh \
     && chown -R shellbase:shellbase /opt/shellbase /workspace
 
 USER shellbase
