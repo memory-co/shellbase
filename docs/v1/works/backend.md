@@ -142,8 +142,7 @@ window 不是单例——**每张"页面"就是一个 window**，后端存着它
 Agent 会话**就是**一条 `kind: "agent"` 的终端注册项，复用同一套注册/attach/回收机制：
 
 - Agent 块的 URI（`claude:///workspace/proj`、`codex:///…`，见 uri.md）走统一 attach 入口：派生 id、登记 state（记录 cwd 与命令模板）、以该 cwd 创建 tmux 会话并启动应用注册表中该 Agent 的命令；
-- design.md §3.5 的观测与交互接口（`input` / `output` / 状态）以同一 `(window, uri)` 定位：
-  `POST /api/windows/{wid}/terminals/input?uri=`（`tmux send-keys`）、`GET /api/windows/{wid}/terminals/output?uri=`（`tmux capture-pane`）；
+- 平台不提供 Agent 的输入/输出接口——观察与交互就是 attach 进块里直接看、直接敲（终端 I/O 由用户自行掌控，见 api/terminals.md）；程序化需求用 tmux 自身的 `send-keys`/`capture-pane` 在终端里解决；
 - 前端 Agent 块的 iframe 同样指向统一 attach 入口——观察与接管是同一个块。
 
 ## 6. 多人协作

@@ -57,23 +57,6 @@
 
 这是**用户在网页上关闭终端块的标准动作**：Shell 关闭块时先调本端点销毁会话，再 `PUT /api/windows/{wid}` 移除叶子——"关闭即销毁"，与 attach 的"打开即登记"对称。会话身份含 window，因此**不存在跨 window 引用问题**：删就是删，无需检查别的 window。
 
-## POST /api/windows/{wid}/terminals/input?uri=
+## 不做的事：终端输入/输出
 
-向会话注入输入（程序化给 Agent 下发任务）：
-
-```json
-{ "text": "帮我修复 tests/ 下的失败用例", "enter": true }
-```
-
-- `tmux send-keys` 实现；`enter: true`（默认）时末尾追加回车；
-- `204`；会话不存在或已 exited → `404` / `409 {"error":"session_exited"}`。
-
-## GET /api/windows/{wid}/terminals/output?uri=&lines=200
-
-抓取会话最近输出（`tmux capture-pane -p`）：
-
-```json
-{ "window": "main", "uri": "claude:///workspace/myproj", "lines": 200, "output": "...终端文本..." }
-```
-
-`lines` 默认 200，上限 5000。用于程序化观测 Agent 进展；人看直接 attach 块即可。
+API **不提供**向会话注入输入或抓取输出的端点。终端的 I/O 完全属于用户：交互走 ttyd 的 WS 通道（attach 进块里直接敲），程序化需求在终端里用 tmux 自身解决（`send-keys` / `capture-pane` 本来就是 shell 命令）。平台的职责止步于会话的生命周期（attach / list / delete），不碰会话里的内容。

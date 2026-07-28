@@ -21,9 +21,7 @@ FastAPI 提供的全部 HTTP/WS 接口。设计依据见 [works/design.md](../wo
 | | `GET  /api/auth/me` | 登录态探测 |
 | [terminals](terminals.md) | `GET /api/windows/{wid}/terminals/attach?uri=` | 唯一 attach 入口：会话身份 = (window, URI)，无中生有 + 302 |
 | | `GET  /api/terminals?window=` | 全局会话观测（state ∪ tmux，可按 window 过滤） |
-| | `DELETE /api/windows/{wid}/terminals?uri=` | 销毁会话（关闭块的标准动作） |
-| | `POST /api/windows/{wid}/terminals/input?uri=` | 注入输入（Agent 下发任务） |
-| | `GET  /api/windows/{wid}/terminals/output?uri=` | 抓取输出 |
+| | `DELETE /api/windows/{wid}/terminals?uri=` | 销毁会话（关闭块的标准动作）。终端 I/O 不设端点，由用户自行掌控 |
 | [windows](windows.md) | `GET /api/windows` | window 列表（每张页面一个 window，状态存后端） |
 | | `GET  /api/windows/{id}` | 读布局树（未知 id 无中生有） |
 | | `PUT  /api/windows/{id}` | 写布局树（version 乐观锁） |

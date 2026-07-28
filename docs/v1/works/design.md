@@ -20,7 +20,7 @@ shellbase = **在任意 VM 上一条 `docker run` 拉起的 Web 工作台**，�
 | 终端 | 单个 pty，断线即丢 | tmux 持久会话，多窗口，断线重连恢复 |
 | 文件 | 无或只有简陋上传 | 完整文件管理器 + 在线编辑器 |
 | 浏览器 | 无 | 内嵌浏览器面板（iframe），与终端/文件同屏 |
-| Agent | 无 | 一等公民：会话管理、任务下发、状态观测 |
+| Agent | 无 | 一等公民：会话管理、同屏观察、随时接管 |
 | 部署 | 依赖宿主 web 服务 | 单容器自包含，nginx 统一入口 |
 | 认证 | 通常裸奔 | token 认证，nginx 层统一鉴权 |
 | 协作 | 无 | 多客户端同开一个页面/终端，实时镜像（见 [collab.md](collab.md)） |
@@ -104,7 +104,7 @@ shellbase = **在任意 VM 上一条 `docker run` 拉起的 Web 工作台**，�
 - 多终端：URL query 传 `?arg=<session>`，`attach.sh` 据此 attach 不同 tmux 会话——每个终端块一个会话；
 - **会话经 Python 收口**：终端块的 iframe 不直接指向 `/tty/`，而是指向 `/api/windows/{wid}/terminals/attach?uri=<块的 URI>`——FastAPI 借鉴 ttyd `arg` 的语义支持**无中生有**（没见过的 `(window, URI)` 当场登记一条 state，每个面板就是一条 state），再 302 到 ttyd；而底下的终端层不允许无中生有：`attach.sh` 只对已有 state 的会话执行 `tmux new-session -A`。会话身份 = (window, URI)，后端始终掌握每个 window 打开中的全部面板（详见 [backend.md](backend.md) 与 [uri.md](uri.md)）。
 
-选 tmux 而不是裸 pty 的理由：断线重连不丢现场、Agent 长任务不因刷新页面而中断、天然支持多会话，并且 Agent 的输出历史可以通过 `tmux capture-pane` 被 API 读取。
+选 tmux 而不是裸 pty 的理由：断线重连不丢现场、Agent 长任务不因刷新页面而中断、天然支持多会话；输出历史、注入输入这类程序化需求也由 tmux 自身（`capture-pane`/`send-keys`）在终端内解决，无需平台代劳。
 
 ### 3.3 FastAPI（接口服务）
 
@@ -164,8 +164,7 @@ v1 的 Agent 模型是「**运行在 tmux 会话里的 CLI Agent 进程**」，�
   Agent 块的 URI（如 `claude:///workspace/proj`）经统一 attach 入口无中生有——登记 state、以 path 为 cwd 创建 tmux 会话并启动该 Agent 的命令
   （命令模板来自应用注册表：内置 `claude`、`codex` 等，可经 `SHELLBASE_APPS_EXTRA` 扩展，见 3.6）；
 - `GET /api/terminals`：列出会话及状态（alive / exited，另以 `kind: external` 标记手工创建的 tmux 会话，见 backend.md §7）；
-- `POST /api/windows/{wid}/terminals/input?uri=`：向会话注入文本（`tmux send-keys`），用于程序化下发任务；
-- `GET /api/windows/{wid}/terminals/output?uri=`：`tmux capture-pane` 抓取最近输出；
+- 平台**不提供**终端输入/输出接口——与 Agent 的交互就是 attach 进块里直接看、直接敲；程序化需求用 tmux 自身的 `send-keys`/`capture-pane` 在终端里解决（见 api/terminals.md"不做的事"）；
 - Agent 应用块（如 Claude Code、Codex）装载的就是该 tmux 会话的终端——因此"观察 Agent"和"接管操作"是同一个块，无需切换。
 
 Agent 与文件/浏览器的融合点：Agent 在终端里跑，工作目录就是 `/workspace`（与文件浏览器应用同源）；Agent 起的 web 服务（dev server 等），用户在旁边的浏览器块里输入地址即可预览——同屏分割布局让"Agent 改代码 → 看效果"零切换。
@@ -304,7 +303,7 @@ shellbase/
 | M1 骨架 | Dockerfile + supervisord + nginx + ttyd(tmux) + FastAPI 健康检查 + token 鉴权 + 分割布局 Shell（终端应用可装块） | 一条 docker run 后登录，任意分割布局并在多个块中使用持久终端 |
 | M2 文件 | 文件 API 全套 + 文件浏览器应用（树/编辑器/上传下载） | 终端改文件 ⇄ 文件块实时可见、可编辑 |
 | M3 浏览器 | 浏览器应用（地址栏/历史/URL 恢复）+ 布局持久化 | 终端块起 dev server，旁边浏览器块预览；刷新页面布局原样恢复 |
-| M4 Agent | Agent 会话 API + Claude Code / Codex 应用接入启动页 | 空白块（启动页）选择 Claude Code 即启动会话，可下发任务、直接接管 |
+| M4 Agent | Agent 会话（URI attach）+ Claude Code / Codex 应用接入启动页 | 空白块（启动页）选择 Claude Code 即启动会话，块内直接对话、随时接管 |
 | M5 打磨 | 断线重连、限流、日志、system info、文档 | 30 分钟断网重连后现场无损 |
 
 ## 8. 主要技术决策记录（ADR 摘要)
