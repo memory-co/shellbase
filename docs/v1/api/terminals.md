@@ -1,0 +1,86 @@
+# Terminals API
+
+设计背景：[works/backend.md](../works/backend.md) §2（无中生有 + 302 attach）、[works/uri.md](../works/uri.md)（URI → state id 派生）、[works/collab.md](../works/collab.md)（共享/只读）。
+
+会话对象（响应中的 `terminal` 结构）：
+
+```json
+{
+  "id": "codex-workspace-myproj-2",
+  "uri": "codex:///workspace/myproj?tab=2",
+  "kind": "agent",                  // plain | agent | external
+  "cwd": "/workspace/myproj",
+  "cmd": "codex",                   // plain 会话为 null
+  "status": "alive",                // alive | exited
+  "created_at": "2026-07-28T09:00:00Z",
+  "last_attached": "2026-07-28T10:30:00Z",
+  "clients": 2                      // 当前 attach 的客户端数（tmux list-clients）
+}
+```
+
+## GET /api/terminals/attach?uri=&mode=
+
+**主入口**。iframe 的 src 指向这里，不直接指向 `/tty/`。
+
+| 参数 | 说明 |
+|------|------|
+| `uri` | URL-encoded 的虚拟 URI，仅接受终端类 scheme（`bash://`、`claude://`、`codex://` 及注册表中 `terminal` 型），其余 `400 {"error":"not_terminal_scheme"}` |
+| `mode` | 可选，`ro` = 只读 attach（`tmux attach -r`），非身份参数 |
+
+行为：
+
+1. 规范化 URI → 确定性派生 state id（uri.md §4）；
+2. state 不存在：**无中生有**——写入 state 文件（记录原始 URI/cwd/cmd）；Agent 类同时预创建 tmux 会话并拉起命令。例外：`mode=ro` 时不创建，返回 `404 {"error":"no_such_session"}`；
+3. state 已存在：更新 `last_attached`；若 tmux 会话已消亡（status=exited），按 state 记录的 cwd/cmd 重建；
+4. `302 Location: /tty/?arg=<id>`（`mode=ro` 时附加只读参数）。
+
+## GET /api/terminals/{id}/attach?mode=
+
+按已知 id attach：读取 state 中记录的 URI，行为等价于主入口。id 不存在 → `404`（此入口**不**无中生有——凭空的 id 没有 URI 语义）。
+
+## GET /api/terminals
+
+列表：state ∪ `tmux ls` 的合并视图（顺带触发一次对账，backend.md §7）。
+
+```json
+{ "terminals": [ { ...terminal }, ... ] }
+```
+
+- 用户在终端里手工 `tmux new` 的会话以 `kind: "external"` 出现，仅展示，不参与布局恢复；
+- 启动页用本端点为 recents 条目标注存活圆点（launcher.md §3.2）。
+
+## POST /api/terminals
+
+显式创建匿名会话（不常用，URI 入口是主路径）：
+
+```json
+// 请求（body 可为空）
+{}
+// 201 响应
+{ "id": "term-4", "uri": "bash://term-4", "attach_url": "/api/terminals/term-4/attach" }
+```
+
+## DELETE /api/terminals/{id}
+
+`tmux kill-session` + 删除 state 文件 → `204`。会话不存在 → `404`。正被其他客户端 attach 时同样执行（tmux 会把所有客户端踢出），前端在 `clients > 1` 时应二次确认。
+
+## POST /api/terminals/{id}/input
+
+向会话注入输入（程序化给 Agent 下发任务）：
+
+```json
+{ "text": "帮我修复 tests/ 下的失败用例", "enter": true }
+```
+
+- `tmux send-keys` 实现；`enter: true`（默认）时末尾追加回车；
+- `204`；会话不存在或已 exited → `404` / `409 {"error":"session_exited"}`。
+
+## GET /api/terminals/{id}/output?lines=200
+
+抓取会话最近输出（`tmux capture-pane -p`）：
+
+```json
+{ "id": "claude-workspace-myproj", "lines": 200, "output": "...终端文本..." }
+```
+
+`lines` 默认 200，上限 5000。用于程序化观测 Agent 进展；人看直接 attach 块即可。

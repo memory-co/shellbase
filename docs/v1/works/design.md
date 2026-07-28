@@ -285,12 +285,14 @@ shellbase/
 ├── bin/
 │   └── attach.sh           # ttyd → tmux（含注册表校验，见 backend.md）
 └── docs/
-    └── v1/works/
-        ├── design.md       # 本文档
-        ├── backend.md      # Python 后端专项设计（状态管理/存储/302 attach）
-        ├── collab.md       # 多人协作专项设计（state 共享/布局广播）
-        ├── uri.md          # 虚拟 URI 定位符设计（块的身份与重入）
-        └── launcher.md     # 启动页设计（应用入口/最近使用记录）
+    └── v1/
+        ├── works/
+        │   ├── design.md   # 本文档
+        │   ├── backend.md  # Python 后端专项设计（状态管理/存储/302 attach）
+        │   ├── collab.md   # 多人协作专项设计（state 共享/布局广播）
+        │   ├── uri.md      # 虚拟 URI 定位符设计（块的身份与重入）
+        │   └── launcher.md # 启动页设计（应用入口/最近使用记录）
+        └── api/            # 接口设计（README 总览 + auth/terminals/layout/files/system）
 ```
 
 ## 7. 里程碑
