@@ -19,8 +19,7 @@ FastAPI 提供的全部 HTTP/WS 接口。设计依据见 [works/design.md](../wo
 | | `GET  /api/auth/verify` | nginx auth_request 内部校验 |
 | | `POST /api/auth/logout` | 登出清 Cookie |
 | | `GET  /api/auth/me` | 登录态探测 |
-| [terminals](terminals.md) | `GET /api/terminals/attach?uri=` | 主入口：URI attach（无中生有 + 302） |
-| | `GET  /api/terminals/{id}/attach` | 按 id attach |
+| [terminals](terminals.md) | `GET /api/terminals/attach?uri=` | 唯一 attach 入口：按 URI（无中生有 + 302，id 派生是后端内部细节） |
 | | `GET  /api/terminals` | 会话列表（state ∪ tmux） |
 | | `POST /api/terminals` | 匿名会话显式创建 |
 | | `DELETE /api/terminals/{id}` | 销毁会话 |

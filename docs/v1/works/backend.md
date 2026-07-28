@@ -59,8 +59,7 @@ exec tmux new-session -A -s "$1" -c /workspace
 
 | 端点 | 功能 |
 |------|------|
-| `GET  /api/terminals/attach?uri=` | 主入口：URI 规范化 → 确定性派生 id（见 [uri.md](uri.md)）→ 有则更新 `last_attached`、无则登记（无中生有，state 记录原始 URI/cwd/命令）→ `302 /tty/?arg=<id>` |
-| `GET  /api/terminals/{id}/attach` | 按已知 id attach（等价于用 state 中记录的 URI 走上一行） |
+| `GET  /api/terminals/attach?uri=` | **唯一 attach 入口**：URI 规范化 → 确定性派生 id（见 [uri.md](uri.md)）→ 有则更新 `last_attached`、无则登记（无中生有，state 记录原始 URI/cwd/命令）→ `302 /tty/?arg=<id>`。前端不感知 id 与重入，全由后端控制 |
 | `POST /api/terminals` | 显式创建（可选路径）：分配匿名会话（等价 `bash://?tab=<最小空闲>`），返回 `{id, uri, attach_url}` |
 | `GET  /api/terminals` | 列表：state ∪ `tmux ls` 的合并视图，含状态（alive / exited） |
 | `DELETE /api/terminals/{id}` | `tmux kill-session` + 移除 state |

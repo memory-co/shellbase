@@ -36,9 +36,7 @@
 3. state 已存在：更新 `last_attached`；若 tmux 会话已消亡（status=exited），按 state 记录的 cwd/cmd 重建；
 4. `302 Location: /tty/?arg=<id>`（`mode=ro` 时附加只读参数）。
 
-## GET /api/terminals/{id}/attach?mode=
-
-按已知 id attach：读取 state 中记录的 URI，行为等价于主入口。id 不存在 → `404`（此入口**不**无中生有——凭空的 id 没有 URI 语义）。
+attach 是**唯一入口**，且只按 URI：前端不感知"URI → id"的派生与重入，这些完全由后端控制。id 只是后端的内部产物，仅出现在列表对象和管理端点（DELETE / input / output）的路径里。
 
 ## GET /api/terminals
 
@@ -59,7 +57,7 @@
 // 请求（body 可为空）
 {}
 // 201 响应：等价于 bash://?tab=<最小空闲值>
-{ "id": "bash-workspace-4", "uri": "bash://?tab=4", "attach_url": "/api/terminals/bash-workspace-4/attach" }
+{ "id": "bash-workspace-4", "uri": "bash://?tab=4", "attach_url": "/api/terminals/attach?uri=bash%3A%2F%2F%3Ftab%3D4" }
 ```
 
 ## DELETE /api/terminals/{id}
