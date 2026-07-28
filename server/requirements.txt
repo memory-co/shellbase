@@ -1,0 +1,4 @@
+fastapi>=0.115
+uvicorn[standard]>=0.30
+watchfiles>=0.22
+python-multipart>=0.0.9

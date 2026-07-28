@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>shellbase 登录</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; }
+    body {
+      font: 14px/1.5 system-ui, sans-serif; background: #14161a; color: #d7dae0;
+      display: flex; align-items: center; justify-content: center; height: 100vh;
+    }
+    .card { width: 320px; padding: 28px; background: #1b1e24; border: 1px solid #2c313a; border-radius: 10px; }
+    h1 { font-size: 18px; margin-bottom: 18px; }
+    input {
+      width: 100%; padding: 8px 10px; margin-bottom: 12px; font: inherit;
+      background: #14161a; color: inherit; border: 1px solid #3a3f47; border-radius: 6px;
+    }
+    button {
+      width: 100%; padding: 8px; font: inherit; cursor: pointer;
+      background: #2f6fb2; color: #fff; border: 0; border-radius: 6px;
+    }
+    .err { color: #e57373; font-size: 12px; min-height: 18px; margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <form class="card" id="f">
+    <h1>shellbase</h1>
+    <input id="token" type="password" placeholder="访问令牌（SHELLBASE_TOKEN）" autofocus />
+    <button type="submit">进入</button>
+    <div class="err" id="err"></div>
+  </form>
+  <script>
+    document.getElementById("f").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const err = document.getElementById("err");
+      err.textContent = "";
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: document.getElementById("token").value }),
+      });
+      if (res.status === 204) location.assign("/");
+      else if (res.status === 429) err.textContent = "尝试太频繁，稍后再试";
+      else err.textContent = "令牌不正确";
+    });
+  </script>
+</body>
+</html>

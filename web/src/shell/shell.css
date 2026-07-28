@@ -1,0 +1,50 @@
+.shell { display: flex; flex-direction: column; height: 100%; }
+.shell-loading { padding: 24px; color: #8b93a1; }
+
+.topbar {
+  height: 34px;
+  padding: 0 10px;
+  background: #1b1e24;
+  border-bottom: 1px solid #2c313a;
+  flex: none;
+}
+.brand { font-weight: 600; margin-right: 6px; }
+
+.canvas { flex: 1; min-height: 0; padding: 4px; }
+
+.split { display: flex; width: 100%; height: 100%; }
+.split.row { flex-direction: row; }
+.split.col { flex-direction: column; }
+.pane { min-width: 0; min-height: 0; flex-grow: 0; flex-shrink: 0; overflow: hidden; }
+
+.divider { flex: none; background: #2c313a; }
+.divider:hover { background: #4a90d9; }
+.divider.row { width: 4px; cursor: col-resize; }
+.divider.col { height: 4px; cursor: row-resize; }
+
+.leaf {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  border: 1px solid #2c313a;
+  border-radius: 6px;
+  overflow: hidden;
+}
+.leaf-bar {
+  height: 26px;
+  padding: 0 6px;
+  background: #1b1e24;
+  border-bottom: 1px solid #2c313a;
+  flex: none;
+}
+.leaf-bar button { padding: 0 5px; border: 0; background: transparent; color: #8b93a1; }
+.leaf-bar button:hover { color: #d7dae0; background: #2c313a; }
+.leaf-uri {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #8b93a1;
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+}
+.leaf-body { flex: 1; min-height: 0; }

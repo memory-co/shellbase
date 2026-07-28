@@ -1,0 +1,6 @@
+.browser { display: flex; flex-direction: column; height: 100vh; }
+.addrbar { padding: 6px 8px; border-bottom: 1px solid #2c313a; flex: none; }
+.addrbar input { font-family: ui-monospace, monospace; }
+.addrbar a { color: #8b93a1; text-decoration: none; padding: 2px 6px; }
+.browser iframe { flex: 1; background: #fff; }
+.empty { flex: 1; display: flex; align-items: center; justify-content: center; padding: 24px; text-align: center; }

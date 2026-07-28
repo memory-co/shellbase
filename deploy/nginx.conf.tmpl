@@ -1,0 +1,99 @@
+# shellbase 顶层 HTTP 负载（design.md §3.1）。
+# entrypoint 用 envsubst 渲染，只替换 ${SHELLBASE_PORT}；非 root 运行，路径全部落在 /opt/shellbase/run。
+worker_processes auto;
+pid /opt/shellbase/run/nginx.pid;
+error_log /dev/stderr warn;
+
+events { worker_connections 1024; }
+
+http {
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+    access_log /dev/stdout;
+    sendfile on;
+
+    client_body_temp_path /opt/shellbase/run/client_body;
+    proxy_temp_path /opt/shellbase/run/proxy;
+    fastcgi_temp_path /opt/shellbase/run/fastcgi;
+    uwsgi_temp_path /opt/shellbase/run/uwsgi;
+    scgi_temp_path /opt/shellbase/run/scgi;
+
+    # 登录接口限速：同 IP 60s 内 10 次（api/auth.md）
+    limit_req_zone $binary_remote_addr zone=login:1m rate=10r/m;
+
+    map $http_upgrade $connection_upgrade {
+        default upgrade;
+        ''      close;
+    }
+
+    server {
+        listen ${SHELLBASE_PORT};
+        client_max_body_size 1g;
+        root /opt/shellbase/web;
+
+        # ---- 放行名单：登录页、静态资源、login、health ----
+        location = /login { try_files /login.html =404; }
+        location /assets/ { expires 1h; }
+
+        location = /api/system/health {
+            proxy_pass http://127.0.0.1:8000;
+        }
+
+        location = /api/auth/login {
+            limit_req zone=login burst=5 nodelay;
+            proxy_pass http://127.0.0.1:8000;
+        }
+
+        # ---- auth_request 内部端点 ----
+        location = /api/auth/verify {
+            internal;
+            proxy_pass http://127.0.0.1:8000;
+            proxy_pass_request_body off;
+            proxy_set_header Content-Length "";
+        }
+
+        # ---- 动态路由：一律鉴权 ----
+        location /api/ {
+            auth_request /api/auth/verify;
+            proxy_pass http://127.0.0.1:8000;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection $connection_upgrade;
+            proxy_read_timeout 24h;
+        }
+
+        location /tty/ {
+            auth_request /api/auth/verify;
+            proxy_pass http://127.0.0.1:7681/;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection $connection_upgrade;
+            proxy_read_timeout 24h;
+        }
+
+        # https://localhost:<port> 类 URI 的代理通道（uri.md §3）
+        location ~ ^/proxy/(?<pport>\d+)(?<prest>/.*)?$ {
+            auth_request /api/auth/verify;
+            proxy_pass http://127.0.0.1:$pport$prest$is_args$args;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection $connection_upgrade;
+            proxy_set_header Host $host;
+            proxy_read_timeout 24h;
+        }
+
+        # 应用页面（iframe 装载）：/apps/launcher → /apps/launcher.html
+        location /apps/ {
+            auth_request /api/auth/verify;
+            error_page 401 =302 /login;
+            try_files $uri $uri.html =404;
+        }
+
+        # Shell 页面本身也要登录
+        location / {
+            auth_request /api/auth/verify;
+            error_page 401 =302 /login;
+            try_files $uri /index.html;
+        }
+    }
+}

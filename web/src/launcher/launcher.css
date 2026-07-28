@@ -1,0 +1,25 @@
+.launcher { max-width: 720px; margin: 0 auto; padding: 18px 16px; }
+.uribar { margin-bottom: 18px; }
+.uribar input { font-family: ui-monospace, monospace; }
+
+.section-title { margin: 14px 0 8px; color: #8b93a1; font-size: 12px; }
+
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; }
+.app {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 14px 8px;
+}
+.app-icon { font-size: 22px; }
+
+.pickbar { margin-top: 10px; padding: 8px; background: #1b1e24; border-radius: 6px; }
+.pickbar input { font-family: ui-monospace, monospace; }
+
+.recents { display: flex; flex-direction: column; gap: 2px; }
+.recent { padding: 2px 0; }
+.recent-uri {
+  text-align: left; background: transparent; border: 0;
+  font-family: ui-monospace, monospace; font-size: 12px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.recent-uri:hover { color: #7ab4e8; background: transparent; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: #4caf50; flex: none; }
