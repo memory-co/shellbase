@@ -1,10 +1,10 @@
-# Layouts API
+# Windows API
 
-设计背景：[works/backend.md](../works/backend.md) §4（服务端布局持久化）、[works/collab.md](../works/collab.md) §3（多客户端实时同步）。
+设计背景：[works/backend.md](../works/backend.md) §4（服务端 window 状态持久化）、[works/collab.md](../works/collab.md) §3（多客户端实时同步）。
 
-**layout 是可数的资源**：每张"页面"一个 layout，id 即身份（默认页面 `main`）。前端 URL `/#l/<id>` 决定打开哪张页面，缺省 `main`。id 语义与终端 URI 一致——无中生有：访问未知 id 即得到一张空页面。
+**window 是可数的资源**：每张"页面"就是一个 window，后端存着它的完整状态（布局树 + 每块的 URI），id 即身份（默认 window `main`）。前端 URL `/#w/<id>` 决定打开哪个 window，缺省 `main`。id 语义与终端 URI 一致——无中生有：访问未知 id 即得到一个空 window。
 
-布局对象：递归二叉分割树，叶子只存块的 URI（uri.md §5）：
+window 对象：递归二叉分割的布局树，叶子只存块的 URI（uri.md §5）：
 
 ```json
 {
@@ -30,13 +30,13 @@
 - 空白块（启动页）叶子记为 `{ "type": "leaf", "uri": null }`；
 - `name` 是展示名，可改，不参与身份；id 建 slug 校验（`[a-z0-9-]{1,64}`）。
 
-## GET /api/layouts
+## GET /api/windows
 
-列出全部页面——"当前存在多少张 layout"的答案：
+列出全部 window——"当前存在多少个 window"的答案：
 
 ```json
 {
-  "layouts": [
+  "windows": [
     { "id": "main",   "name": "主工作台", "updated_at": "2026-07-28T09:00:00Z", "blocks": 4 },
     { "id": "review", "name": "review",  "updated_at": "2026-07-27T18:00:00Z", "blocks": 2 }
   ]
@@ -45,13 +45,13 @@
 
 首次使用时至少含自动创建的 `main`。
 
-## GET /api/layouts/{id}
+## GET /api/windows/{id}
 
 - 已存在：`200` 返回布局对象；
-- 未知 id：**无中生有**——落盘一张空页面（单个 `uri: null` 启动页块，`version: 1`，`name` = id）并返回之。进入 `/#l/xxx` 即创建页面，与终端 URI 的 attach 语义对称；
-- id 不合法（slug 校验不过）：`400 {"error":"bad_layout_id"}`。
+- 未知 id：**无中生有**——落盘一个空 window（单个 `uri: null` 启动页块，`version: 1`，`name` = id）并返回之。进入 `/#w/xxx` 即创建 window，与终端 URI 的 attach 语义对称；
+- id 不合法（slug 校验不过）：`400 {"error":"bad_window_id"}`。
 
-## PUT /api/layouts/{id}
+## PUT /api/windows/{id}
 
 全量覆盖写。请求体即布局对象，`version` 必须为**当前版本 + 1**：
 
@@ -61,26 +61,26 @@
 
 前端节流：布局变更（分割/关闭/换应用/拖比例结束）后防抖 ~500ms 再 PUT，拖动过程中不写。
 
-## DELETE /api/layouts/{id}
+## DELETE /api/windows/{id}
 
-删除页面。执行顺序：
+删除 window。执行顺序：
 
-1. 对树中每个终端类叶子按"关闭即销毁"处理——但**仅当该会话不被其他 layout 的叶子引用**时才 `kill-session` + 删 state（同一 URI 可能出现在多张页面上）；
-2. 删除布局文件，向该页面的 `watch` 广播 `{"type":"layout_deleted"}`（正在此页面的客户端跳回 `main`）。
+1. 对树中每个终端类叶子按"关闭即销毁"处理——但**仅当该会话不被其他 window 的叶子引用**时才 `kill-session` + 删 state（同一 URI 可能出现在多个 window 上）；
+2. 删除 window 文件，向该 window 的 `watch` 广播 `{"type":"window_deleted"}`（正在此 window 的客户端跳回 `main`）。
 
 `main` 不可删除（`400 {"error":"cannot_delete_main"}`）；不存在 → `404`。
 
-## WS /api/layouts/{id}/watch
+## WS /api/windows/{id}/watch
 
-单张页面的变更广播通道，协作的实时性来源。连接后：
+单个 window 的变更广播通道，协作的实时性来源。连接后：
 
 ```json
-// 服务端 → 客户端，每次该页面 PUT 成功后推送
-{ "type": "layout_updated", "version": 6 }
-// 页面被删除时
-{ "type": "layout_deleted" }
+// 服务端 → 客户端，每次该 window PUT 成功后推送
+{ "type": "window_updated", "version": 6 }
+// window 被删除时
+{ "type": "window_deleted" }
 ```
 
-- 客户端收到版本号大于本地的通知即 `GET /api/layouts/{id}` 拉新树、diff 重渲染（uri 未变的块 iframe 原地保留，不闪断）；
+- 客户端收到版本号大于本地的通知即 `GET /api/windows/{id}` 拉新树、diff 重渲染（uri 未变的块 iframe 原地保留，不闪断）；
 - 不在 WS 里传树本体——只传版本号，拉取仍走 GET，保证单一数据通道；
 - 心跳：服务端每 30s 发 `{"type":"ping"}`，客户端应答 `{"type":"pong"}`；连接断开由客户端指数退避重连，重连成功后先 GET 一次全量。

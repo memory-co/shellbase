@@ -26,11 +26,11 @@ FastAPI 提供的全部 HTTP/WS 接口。设计依据见 [works/design.md](../wo
 | | `DELETE /api/terminals/{id}` | 销毁会话 |
 | | `POST /api/terminals/{id}/input` | 注入输入（Agent 下发任务） |
 | | `GET  /api/terminals/{id}/output` | 抓取输出 |
-| [layouts](layout.md) | `GET /api/layouts` | 页面列表（多 layout） |
-| | `GET  /api/layouts/{id}` | 读布局树（未知 id 无中生有） |
-| | `PUT  /api/layouts/{id}` | 写布局树（version 乐观锁） |
-| | `DELETE /api/layouts/{id}` | 删除页面（连带销毁独占的终端会话） |
-| | `WS   /api/layouts/{id}/watch` | 单页面版本广播（协作） |
+| [windows](windows.md) | `GET /api/windows` | window 列表（每张页面一个 window，状态存后端） |
+| | `GET  /api/windows/{id}` | 读布局树（未知 id 无中生有） |
+| | `PUT  /api/windows/{id}` | 写布局树（version 乐观锁） |
+| | `DELETE /api/windows/{id}` | 删除页面（连带销毁独占的终端会话） |
+| | `WS   /api/windows/{id}/watch` | 单页面版本广播（协作） |
 | [files](files.md) | `GET /api/files/tree` | 目录列表 |
 | | `GET/PUT /api/files/content` | 读/写文件 |
 | | `POST /api/files/upload` | 上传 |

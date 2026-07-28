@@ -68,4 +68,4 @@
 ```
 
 - 事件在服务端做 200ms 合并去抖（编译类工具的风暴写入合并为少量事件）；
-- 心跳与重连约定同 [layout.md](layout.md) 的 watch。
+- 心跳与重连约定同 [windows.md](windows.md) 的 watch。

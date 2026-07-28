@@ -116,7 +116,7 @@ app/
 ├── auth.py              # /api/auth/{login,verify,logout,me}（verify 供 nginx auth_request）
 ├── files.py             # 文件管理
 ├── terminals.py         # 终端会话注册表 + 302 attach + Agent 会话（见 backend.md）
-├── layout.py            # 页面布局树的读写 + watch 广播（见 backend.md / collab.md）
+├── windows.py           # window（页面）状态的读写 + watch 广播（见 backend.md / collab.md）
 ├── state.py             # 文件系统状态存储（原子写、对账、回收）
 └── system.py            # /api/system/{info,health} + /api/apps 应用注册表
 ```
@@ -190,7 +190,7 @@ Agent 与文件/浏览器的融合点：Agent 在终端里跑，工作目录就�
 
 - 布局模型是**递归二叉分割树**：每个节点要么是横/纵分割（带比例），要么是叶子（一个块）；支持拖拽调整比例、任意块再分割、关闭合并——**关闭终端类块会真正销毁后端会话**（`DELETE`，kill tmux + 删 state，见 backend.md §4.2），不是仅从页面摘除；
 - 空白块默认装载**启动页**（`/apps/launcher`，类似浏览器新标签页）：应用宫格 + 各应用最近使用记录，本质是 URI 构造器（选应用/点记录 = 产出块的 URI，见 [uri.md](uri.md) 与 [launcher.md](launcher.md)）；
-- 布局树 + 每块的应用与参数**持久化在后端**，且**页面可以有多张**：每张页面是一个有 id 的 layout（`/#l/<id>`，缺省 `main`，未知 id 无中生有），`GET/PUT /api/layouts/{id}` 防抖全量覆盖（见 [backend.md](backend.md)）——换浏览器、换设备、容器重启后进入，都恢复出一模一样的页面（终端块靠 tmux 恢复现场，天然无损）；
+- 布局树 + 每块的应用与参数**持久化在后端**，且**页面可以有多张**：每张页面是一个有 id 的 **window**，后端存每个 window 的完整状态（`/#w/<id>`，缺省 `main`，未知 id 无中生有），`GET/PUT /api/windows/{id}` 防抖全量覆盖（见 [backend.md](backend.md)）——换浏览器、换设备、容器重启后进入，都恢复出一模一样的页面（终端块靠 tmux 恢复现场，天然无损）；
 - 同源 iframe 自动携带认证 Cookie，各应用无需单独处理鉴权。
 
 **块即 URI**：每个块由一个虚拟 URI 唯一定位（专项设计见 [uri.md](uri.md)），它是块的身份、持久化内容和重入凭证。Shell 的解析器只做**四类分流**——本地服务（https+localhost）、外部站点（https+其余 host）、文件（file://）、其余未知一律转发终端 attach 入口，终端 scheme 的适配与裁决全在后端：
@@ -294,7 +294,7 @@ shellbase/
         │   ├── collab.md   # 多人协作专项设计（state 共享/布局广播）
         │   ├── uri.md      # 虚拟 URI 定位符设计（块的身份与重入）
         │   └── launcher.md # 启动页设计（应用入口/最近使用记录）
-        └── api/            # 接口设计（README 总览 + auth/terminals/layout/files/system）
+        └── api/            # 接口设计（README 总览 + auth/terminals/windows/files/system）
 ```
 
 ## 7. 里程碑
