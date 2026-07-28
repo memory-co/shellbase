@@ -12,10 +12,17 @@ RUN npm run build
 FROM debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        nginx tmux ttyd supervisor \
+        nginx tmux supervisor \
         python3 python3-venv \
         gettext-base curl ca-certificates git \
     && rm -rf /var/lib/apt/lists/*
+
+# ttyd 不在 bookworm 仓库，从 GitHub releases 取静态二进制（x86_64 / aarch64 同名规则）
+ARG TTYD_VERSION=1.7.7
+RUN curl -fsSL -o /usr/local/bin/ttyd \
+        "https://github.com/tsl0922/ttyd/releases/download/${TTYD_VERSION}/ttyd.$(uname -m)" \
+    && chmod +x /usr/local/bin/ttyd \
+    && /usr/local/bin/ttyd --version
 
 RUN useradd -m -u 1000 shellbase
 
