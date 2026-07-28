@@ -197,7 +197,7 @@ Agent 与文件/浏览器的融合点：Agent 在终端里跑，工作目录就�
 
 | 块 URI 示例 | 应用 | 解析为 |
 |------|-----|------|
-| `bash://main` | 终端 | `/api/terminals/attach?uri=…` → 302 到 ttyd 页面（无中生有，见 backend.md） |
+| `bash:///workspace/proj` | 终端 | `/api/terminals/attach?uri=…` → 302 到 ttyd 页面（无中生有，见 backend.md） |
 | `file:///workspace/src` | 文件浏览器 | `/apps/files?path=…`（文件树 + CodeMirror 6 编辑器 + 上传下载，经 `/api/files/watch` 实时刷新） |
 | `https://www.example.com` | 浏览器（外链） | `/apps/browser?url=…`，内层 iframe 直连（见 3.4） |
 | `https://localhost:5173` | 浏览器（本地服务） | `/apps/browser?url=…`，内层经 nginx 通配代理 `/proxy/5173/`，同源无嵌入限制 |

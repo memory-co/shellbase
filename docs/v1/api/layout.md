@@ -11,7 +11,7 @@
   "root": {
     "type": "split", "dir": "row", "ratio": 0.6,
     "children": [
-      { "type": "leaf", "uri": "bash://main" },
+      { "type": "leaf", "uri": "bash://" },
       { "type": "split", "dir": "col", "ratio": 0.5,
         "children": [
           { "type": "leaf", "uri": "https://localhost:5173/" },

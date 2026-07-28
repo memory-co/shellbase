@@ -27,7 +27,7 @@
 ├──────────────────────────────────────────────────┤
 │   最近使用（按应用分组 / 按时间混排，可切换）          │
 │   ▸ codex:///workspace/myproj        2 小时前  ●  │
-│   ▸ bash://build                     昨天      ●  │
+│   ▸ bash:///workspace/build          昨天      ●  │
 │   ▸ https://localhost:5173/          昨天         │
 │   ▸ file:///workspace/notes.md       3 天前       │
 │     （● = 现场仍存活，点击即重入；无点 = 重新加载）    │

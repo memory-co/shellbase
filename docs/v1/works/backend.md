@@ -26,11 +26,11 @@ state 的设计**借鉴 ttyd `arg` 的无中生有语义**：attach 入口收到
 ```
 前端 Shell                       FastAPI                            ttyd
    │ iframe.src =                   │                                 │
-   │  /api/terminals/attach?uri=bash://main                           │
-   │───────────────────────────────▶│ 派生 id=bash-main，state 有？    │
-   │                                │  ├─ 无 → 写 terminals/bash-main.json（无中生有）
+   │  /api/terminals/attach?uri=bash://                               │
+   │───────────────────────────────▶│ 派生 id=bash-workspace，state 有？│
+   │                                │  ├─ 无 → 写 terminals/bash-workspace.json（无中生有）
    │                                │  └─ 有 → 更新 last_attached      │
-   │◀─302 /tty/?arg=bash-main───────│                                 │
+   │◀─302 /tty/?arg=bash-workspace──│                                 │
    │                                │                                 │
    │──(iframe 跟随 302)──────────────────────────────────────────────▶│ attach.sh → tmux
 ```
@@ -53,7 +53,7 @@ exec tmux new-session -A -s "$1" -c /workspace
 
 绕过 attach 端点直接访问 `/tty/?arg=rogue` 不会产生 pty；经 attach 端点进来则先落 state 再放行——两条路都保证 state 与实际会话一一对应。state 文件由 FastAPI 独家写入，`attach.sh` 只读。
 
-带自定义 cwd 或启动命令的会话（Agent 类，见 §5）由 FastAPI 在 302 之前**预创建** tmux 会话并拉起命令，`attach.sh` 的 `new-session -A` 对它们只会命中已存在的会话；上面片段中的默认 `-c /workspace` 仅作用于普通 bash 会话。
+带自定义 cwd 或启动命令的会话（非默认目录的 `bash://`、以及 `claude://` 等各类 CLI scheme）由 FastAPI 在 302 之前**预创建** tmux 会话（`cd <path> && <cmd>`），`attach.sh` 的 `new-session -A` 对它们只会命中已存在的会话；上面片段中的默认 `-c /workspace` 仅兜底最朴素的 `bash://`。
 
 ### 2.4 终端 API
 
@@ -61,7 +61,7 @@ exec tmux new-session -A -s "$1" -c /workspace
 |------|------|
 | `GET  /api/terminals/attach?uri=` | 主入口：URI 规范化 → 确定性派生 id（见 [uri.md](uri.md)）→ 有则更新 `last_attached`、无则登记（无中生有，state 记录原始 URI/cwd/命令）→ `302 /tty/?arg=<id>` |
 | `GET  /api/terminals/{id}/attach` | 按已知 id attach（等价于用 state 中记录的 URI 走上一行） |
-| `POST /api/terminals` | 显式创建（可选路径）：不带 URI 时分配匿名会话 `term-<n>`，返回 `{id, attach_url}` |
+| `POST /api/terminals` | 显式创建（可选路径）：分配匿名会话（等价 `bash://?tab=<最小空闲>`），返回 `{id, uri, attach_url}` |
 | `GET  /api/terminals` | 列表：state ∪ `tmux ls` 的合并视图，含状态（alive / exited） |
 | `DELETE /api/terminals/{id}` | `tmux kill-session` + 移除 state |
 
@@ -75,8 +75,8 @@ exec tmux new-session -A -s "$1" -c /workspace
 /workspace/.shellbase/state/
 ├── layout.json                 # 整个页面的分割布局（§4）
 ├── terminals/
-│   ├── bash-main.json          # {id, uri:"bash://main", kind:"plain", created_at, last_attached}
-│   ├── bash-build.json
+│   ├── bash-workspace.json     # {id, uri:"bash://", kind:"plain", created_at, last_attached}
+│   ├── bash-workspace-myproj.json
 │   └── claude-workspace-myproj.json
 │                               # {id, uri:"claude:///workspace/myproj", kind:"agent",
 │                               #  cwd:"/workspace/myproj", cmd:"claude", ...}
@@ -104,7 +104,7 @@ exec tmux new-session -A -s "$1" -c /workspace
   "root": {
     "type": "split", "dir": "row", "ratio": 0.6,
     "children": [
-      { "type": "leaf", "uri": "bash://main" },
+      { "type": "leaf", "uri": "bash://" },
       { "type": "split", "dir": "col", "ratio": 0.5,
         "children": [
           { "type": "leaf", "uri": "https://localhost:5173/" },

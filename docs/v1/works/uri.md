@@ -35,13 +35,13 @@ https 类装载的是浏览器应用页（design.md §3.4：地址栏 + 内层 i
 | `https://localhost:5173/` | 容器/本机上的 web 服务 | 浏览器应用打开，内层经 nginx 通配代理 `/proxy/5173/` 访问——外部无需映射该端口，且同源、无嵌入限制 |
 | `file:///workspace/src` | 本地目录 | 文件浏览器应用定位到该目录（文件树） |
 | `file:///workspace/src/main.py` | 本地文件 | 文件浏览器应用直接打开该文件（编辑器） |
-| `bash://main` | 本地 bash 终端 | 终端会话，state id 派生自 URI → `302 /tty/?arg=<id>` |
+| `bash:///workspace/proj` | 在该目录启动 bash 终端 | 终端会话，state id 派生自 URI → `302 /tty/?arg=<id>` |
 | `claude:///workspace/myproj` | 在该目录启动 Claude Code | Agent 终端：tmux 会话 cwd 为该目录、启动命令 `claude` |
 | `codex:///workspace/myproj` | 在该目录启动 Codex | 同上，命令 `codex` |
 
 约定：
 
-- 终端/Agent 类 scheme 的 **path 表示工作目录**（省略则默认 `/workspace`）；`bash://` 的 authority 位置是**会话名**（`bash://main`、`bash://build`），允许同目录开多个互不相干的终端；
+- 终端/Agent 类 scheme 的 **path 表示工作目录**（省略则默认 `/workspace`），`bash://` 也不例外——同目录开多个互不相干的终端用 `?tab`（§4.1）；
 - `https://localhost` 与 `https://127.0.0.1` 等价，其余 host 一律按外链处理；
 - `query` 携带 scheme 相关参数：`?tab=<n>` 区分同路径的多个并行实例（身份参数，仅终端/Agent 类 scheme 有意义，见 §4.1）；`?mode=ro` 只读 attach（非身份参数，见 collab.md）。
 
@@ -59,7 +59,7 @@ htop://                        →  cd /workspace && htop
 - **path 是目录**：cwd = 该目录，命令无参启动；**path 是文件**：cwd = 父目录，文件名作为第一个参数——编辑器类（vim、nano）因此自然可用；
 - **合法性校验**：attach 时后端 `shutil.which(<scheme>)` 确认命令存在于 PATH，不存在 → `400 {"error":"cmd_not_found"}`；
 - **这不是新增权限**：能开 `bash://` 的人本来就能运行任意命令，scheme 只是把"到哪个目录、跑哪个命令"编码进了定位符，能力边界与 design.md §5"能力自觉"一致；
-- `bash://` 是唯一的例外约定：authority 位是会话名而非路径/参数（见上）。
+- `bash://` 与其他命令**完全同构**：`bash:///workspace/proj` = `cd /workspace/proj && bash`，没有任何特例。
 
 ## 4. 重入：URI → state id 的确定性映射
 
@@ -71,7 +71,7 @@ htop://                        →  cd /workspace && htop
 规范化规则：scheme 小写、路径去尾斜杠、剔除非身份参数、`tab=1` 视为缺省并省略。
 
 ```
-bash://main                       →  bash-main
+bash://                           →  bash-workspace（path 缺省 = /workspace）
 claude:///workspace/myproj        →  claude-workspace-myproj（超长或含特殊字符时取 slug + 短哈希）
 codex:///workspace/myproj         →  codex-workspace-myproj
 codex:///workspace/myproj?tab=2   →  codex-workspace-myproj-2

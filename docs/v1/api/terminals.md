@@ -22,11 +22,11 @@
 
 **主入口**。iframe 的 src 指向这里，不直接指向 `/tty/`。
 
-**适配层在本端点**：前端只做四类分流（本地服务 / 外部站点 / `file://` / 其余未知），凡未知 scheme 一律盲转发到这里——scheme 是否合法、映射到什么命令（scheme 名即命令名 / 注册表别名 / `bash://` 会话名约定）、命令是否存在，全部由本端点裁决（uri.md §2、§3.1）。前端不维护终端 scheme 名单。
+**适配层在本端点**：前端只做四类分流（本地服务 / 外部站点 / `file://` / 其余未知），凡未知 scheme 一律盲转发到这里——scheme 是否合法、映射到什么命令（scheme 名即命令名 / 注册表别名）、命令是否存在，全部由本端点裁决（uri.md §2、§3.1）。前端不维护终端 scheme 名单。
 
 | 参数 | 说明 |
 |------|------|
-| `uri` | URL-encoded 的虚拟 URI，仅接受终端类 scheme：`bash://`，以及任意"scheme 名即命令名"的 CLI（`claude://`、`codex://`、`vim://`…，见 uri.md §3.1，注册表可提供别名）。`file://`/`https://`/`url` 型 → `400 {"error":"not_terminal_scheme"}`；scheme 对应命令不在 PATH → `400 {"error":"cmd_not_found"}` |
+| `uri` | URL-encoded 的虚拟 URI，仅接受终端类 scheme——任意"scheme 名即命令名"的 CLI（`bash://`、`claude://`、`codex://`、`vim://`…，见 uri.md §3.1，注册表可提供别名）。`file://`/`https://`/`url` 型 → `400 {"error":"not_terminal_scheme"}`；scheme 对应命令不在 PATH → `400 {"error":"cmd_not_found"}` |
 | `mode` | 可选，`ro` = 只读 attach（`tmux attach -r`），非身份参数 |
 
 行为：
@@ -58,8 +58,8 @@
 ```json
 // 请求（body 可为空）
 {}
-// 201 响应
-{ "id": "term-4", "uri": "bash://term-4", "attach_url": "/api/terminals/term-4/attach" }
+// 201 响应：等价于 bash://?tab=<最小空闲值>
+{ "id": "bash-workspace-4", "uri": "bash://?tab=4", "attach_url": "/api/terminals/bash-workspace-4/attach" }
 ```
 
 ## DELETE /api/terminals/{id}
