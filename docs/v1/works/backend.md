@@ -73,7 +73,9 @@ exec tmux new-session -A -s "$1" -c /workspace
 
 ```
 /workspace/.shellbase/state/
-├── layout.json                 # 整个页面的分割布局（§4）
+├── layouts/                    # 每张页面一个布局文件（§4）
+│   ├── main.json               # 默认页面
+│   └── review.json
 ├── terminals/
 │   ├── bash-workspace.json     # {id, uri:"bash://", kind:"plain", created_at, last_attached}
 │   ├── bash-workspace-myproj.json
@@ -93,12 +95,16 @@ exec tmux new-session -A -s "$1" -c /workspace
 
 ## 4. 布局持久化：恢复一模一样的页面
 
-### 4.1 数据模型
+### 4.1 数据模型：layout 是可数的资源
 
-`layout.json` 保存 Shell 的整棵分割树（与 design.md §3.6 的递归二叉分割模型一一对应）：
+layout 不是单例——**每张"页面"就是一个 layout**，有自己的 id（默认页面 `main`；用户可另建 `review`、`ops` 等），存为 `layouts/<id>.json`。进入 shellbase 时 URL 决定打开哪张页面（`/#l/<id>`，缺省 `main`）；layout id 的语义与终端 URI 一致——**无中生有**：访问一个不存在的 id 即创建一张空页面（单个启动页块）。
+
+每个 layout 文件保存一棵分割树（与 design.md §3.6 的递归二叉分割模型一一对应）：
 
 ```json
 {
+  "id": "main",
+  "name": "主工作台",
   "version": 3,
   "updated_at": "2026-07-27T12:00:00Z",
   "root": {
@@ -117,16 +123,19 @@ exec tmux new-session -A -s "$1" -c /workspace
 
 ### 4.2 同步与恢复
 
-- **写**：前端 Shell 在每次布局变更（分割/关闭/换应用/拖比例结束）后，**防抖 ~500ms** 调 `PUT /api/layout` 全量覆盖；`version` 单调递增，后端拒绝旧版本覆盖新版本（last-write-wins，防两个标签页互相打架时旧页面回写）；
-- **读**：Shell 启动时 `GET /api/layout` 还原整棵树；
+- **写**：前端 Shell 在每次布局变更（分割/关闭/换应用/拖比例结束）后，**防抖 ~500ms** 调 `PUT /api/layouts/{id}` 全量覆盖；`version` 单调递增，后端拒绝旧版本覆盖新版本（last-write-wins，防两个标签页互相打架时旧页面回写）；
+- **读**：Shell 启动时按 URL 中的 layout id `GET /api/layouts/{id}` 还原整棵树；
 - **恢复零特判**：还原时每个终端类叶子照常把 iframe 指向 `/api/terminals/attach?uri=<叶子的 uri>` 即可——tmux 现场还在则原样接上；会话已消亡（如容器重启）则由无中生有语义自动重建同名会话，块的位置与用途不变，只是 shell 现场从头开始；
 - **关闭即销毁**：用户在网页上关闭一个块，不只是从布局树里摘掉——终端类叶子会同步 `DELETE /api/terminals/{id}`（kill tmux 会话 + 删 state 文件），后端资源真正释放；无状态叶子（file/https）只改布局。打开与关闭因此对称：打开 = 无中生有登记，关闭 = 彻底注销；
 - localStorage 不再承担布局存储，仅可留作断网时的临时兜底。
 
 | 端点 | 功能 |
 |------|------|
-| `GET /api/layout` | 读取布局树（404 = 首次使用，前端给默认单块布局） |
-| `PUT /api/layout` | 全量写入，`version` 旧于当前则 409 |
+| `GET  /api/layouts` | 列出全部页面（id、name、updated_at、块数）——回答"当前存在多少张 layout" |
+| `GET  /api/layouts/{id}` | 读取布局树；未知 id 无中生有一张空页面 |
+| `PUT  /api/layouts/{id}` | 全量写入，`version` 旧于当前则 409 |
+| `DELETE /api/layouts/{id}` | 删除页面：先按"关闭即销毁"处理其全部终端块（不被其他 layout 引用的会话才杀），再删布局文件 |
+| `WS   /api/layouts/{id}/watch` | 该页面的版本广播（协作，见 collab.md） |
 
 ## 5. Agent 会话
 
@@ -148,7 +157,7 @@ state 是共享单元，"打开"只是 attach、不是独占——多个客户�
 - **触发时机**：FastAPI 启动时一次 + 每 60s 一次 + `GET /api/terminals` 时顺带；
 - **注册表有、tmux 无**（容器重启、进程被杀）：标记 `status: exited`，**保留注册项**——布局里还引用它，恢复时据此重建；
 - **tmux 有、注册表无**（用户在终端里手工 `tmux new`）：不杀、不收编，列表中标记为 `external`，不参与布局恢复；
-- **垃圾回收只是兜底**：正常路径下"关闭块"已同步 DELETE（§4.2 关闭即销毁），不会留孤儿；GC 处理的是异常漂移——客户端崩溃没来得及 DELETE、布局被手工改坏等导致的"`exited` 且不被 `layout.json` 任何叶子引用"的注册项，超过保留期（默认 7 天）后清除。
+- **垃圾回收只是兜底**：正常路径下"关闭块"已同步 DELETE（§4.2 关闭即销毁），不会留孤儿；GC 处理的是异常漂移——客户端崩溃没来得及 DELETE、布局被手工改坏等导致的"`exited` 且不被**任何 layout** 的叶子引用"的注册项，超过保留期（默认 7 天）后清除。
 
 ## 8. 环境变量
 
@@ -159,5 +168,5 @@ state 是共享单元，"打开"只是 attach、不是独占——多个客户�
 ## 9. 对 design.md 的影响清单
 
 - §3.2 / §3.6：终端与 Agent 块的 iframe 不再直拼 `/tty/?arg=…`，改为 `/api/terminals/attach?uri=…`（302）；`attach.sh` 增加注册表校验；
-- §3.6：布局持久化从 localStorage 改为后端 `/api/layout`；
+- §3.6：布局持久化从 localStorage 改为后端 `/api/layouts/{id}`（多页面）；
 - §3.5：Agent 会话 API 合并进终端 API（同一注册表，`kind: agent`）。

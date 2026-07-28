@@ -66,7 +66,7 @@
 
 `tmux kill-session` + 删除 state 文件 → `204`。会话不存在 → `404`。正被其他客户端 attach 时同样执行（tmux 会把所有客户端踢出），前端在 `clients > 1` 时应二次确认。
 
-这是**用户在网页上关闭终端块的标准动作**：Shell 关闭块时先调本端点销毁会话，再 `PUT /api/layout` 移除叶子——"关闭即销毁"，与 attach 的"打开即登记"对称（backend.md §4.2）。
+这是**用户在网页上关闭终端块的标准动作**：Shell 关闭块时先调本端点销毁会话，再 `PUT /api/layouts/{id}` 移除叶子——"关闭即销毁"，与 attach 的"打开即登记"对称（backend.md §4.2）。注意：若该会话的 URI 同时出现在其他 layout 中，Shell 应跳过 DELETE 只改布局（判断依据：`GET /api/terminals` 返回的会话对照各 layout，或简化为删除前确认）。
 
 ## POST /api/terminals/{id}/input
 

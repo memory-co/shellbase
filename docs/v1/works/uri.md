@@ -96,7 +96,7 @@ codex:///workspace/myproj?tab=2   →  codex-workspace-myproj-2
 
 ## 5. 与布局、分享的关系
 
-- `layout.json` 的叶子只存 `{"type": "leaf", "uri": "..."}`——URI 是块的全部持久化内容（backend.md §4）；
+- 布局树（`layouts/<id>.json`）的叶子只存 `{"type": "leaf", "uri": "..."}`——URI 是块的全部持久化内容（backend.md §4）；
 - Shell 支持 deep link：`/#open=<encoded-uri>` 进入时自动在新块打开该 URI；块上提供"复制定位符"，把 URI 发给协作者即可让对方打开同一现场；
 - 应用选择器本质是 URI 构造器：选"Codex" + 选目录 = 生成 `codex:///workspace/myproj`。
 
