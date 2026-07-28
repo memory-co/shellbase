@@ -41,12 +41,12 @@
 
 ## 3. 最近使用记录（recents）
 
-### 3.1 存储
+### 3.1 存储：前端本地，不跨设备
 
-记录存在后端（[backend.md](backend.md) 的 state 体系），因此**跨浏览器、跨设备一致**，与布局共享同一持久化承诺：
+recents 是**使用习惯**而非工作现场，存在前端 localStorage，各浏览器私有、不进后端 state、不跨设备同步：
 
-```
-/workspace/.shellbase/state/recents.json
+```js
+// localStorage["shellbase.recents"]
 [
   { "uri": "codex:///workspace/myproj", "last_opened": "2026-07-28T09:00:00Z", "count": 17 },
   { "uri": "https://localhost:5173/",   "last_opened": "2026-07-27T18:20:00Z", "count": 5 }
@@ -54,22 +54,15 @@
 ```
 
 - 按规范化 URI 去重（同一现场只留一条，`last_opened`/`count` 累积；`tab≥2` 的实例是独立身份、独立条目）；
-- 上限 200 条，LRU 淘汰；原子写纪律同 backend.md §3.2。
+- 上限 200 条，LRU 淘汰；条目提供单条删除与一键清空。
 
-### 3.2 采集与 API
+### 3.2 采集与存活标注
 
-Shell 每次成功装载一个块就上报，无论入口是启动页还是 deep link；唯独**布局恢复不上报**——恢复不算"使用"，否则每次刷新都会把全部条目的时间戳冲掉：
-
-| 端点 | 功能 |
-|------|------|
-| `POST /api/recents` | 上报 `{uri}`：规范化、去重合并、刷新 `last_opened`、`count+1` |
-| `GET  /api/recents?scheme=` | 拉取列表，可按 scheme 过滤（供应用表单内嵌），按 `last_opened` 倒序 |
-| `DELETE /api/recents?uri=` | 删除单条（用户清理）；不带 `uri` 则清空 |
-
-终端类条目返回时由后端顺带标注**现场存活状态**（对照 terminals state 与 tmux），启动页据此渲染"仍存活"圆点——用户能一眼分清"重入现场"和"从头再来"。
+- **采集**：Shell 每次成功装载一个块就记一笔，无论入口是启动页还是 deep link；唯独**布局恢复不记**——恢复不算"使用"，否则每次刷新都会把全部条目的时间戳冲掉；
+- **存活标注**：启动页渲染时调用 `GET /api/terminals`（backend.md §2.4），把返回的存活会话与本地终端类条目对照，标出"仍存活"圆点——用户一眼分清"重入现场"和"从头再来"。后端不为 recents 增加任何端点。
 
 ## 4. 与其他文档的关系
 
-- 启动页产出 URI、消费 recents，自身无任何私有状态——是 [uri.md](uri.md) 的交互皮肤；
-- recents 是 backend.md state 体系的一个新成员（`recents.json` + 三个端点），复用其存储纪律与鉴权；
-- 多人协作（[collab.md](collab.md)）下 recents 也是共享的：同伴打开过的入口你也能一键跟进——这与"共享同一个工作台"的模型一致。
+- 启动页产出 URI、消费本地 recents——是 [uri.md](uri.md) 的交互皮肤；
+- 后端零改动：不新增存储与端点，仅复用已有的 `GET /api/terminals` 做存活标注（[backend.md](backend.md)）；
+- 多人协作（[collab.md](collab.md)）下 recents **各自私有**：它记录的是个人使用习惯；要把入口交给同伴，用块上的"复制定位符"分享 URI 本身。

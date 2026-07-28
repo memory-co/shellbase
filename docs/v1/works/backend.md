@@ -74,7 +74,6 @@ exec tmux new-session -A -s "$1" -c /workspace
 ```
 /workspace/.shellbase/state/
 ├── layout.json                 # 整个页面的分割布局（§4）
-├── recents.json                # 最近使用记录（见 launcher.md）
 ├── terminals/
 │   ├── bash-main.json          # {id, uri:"bash://main", kind:"plain", created_at, last_attached}
 │   ├── bash-build.json
