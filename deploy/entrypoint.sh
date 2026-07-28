@@ -1,7 +1,8 @@
 #!/bin/sh
 set -e
 
-: "${SHELLBASE_PORT:=8080}"
+# Cloud Run 等 PaaS 用 PORT 注入监听端口；显式设置的 SHELLBASE_PORT 优先
+: "${SHELLBASE_PORT:=${PORT:-8080}}"
 : "${SHELLBASE_WORKSPACE:=/workspace}"
 : "${SHELLBASE_STATE_DIR:=$SHELLBASE_WORKSPACE/.shellbase/state}"
 
