@@ -44,4 +44,5 @@ Docker `HEALTHCHECK` 与外部探活用。**nginx 对此端点放行**（不经 
 
 - `type: builtin` 的 scheme 由前端固定实现（文件浏览器、浏览器应用）；`terminal` 型统一走 attach 入口；
 - `extra: true` 标记来自 `SHELLBASE_APPS_EXTRA` 的自定义项；
+- 本列表只是**启动页宫格的展示项**，不是终端类 scheme 的白名单——未注册的 CLI（`vim://`、`htop://`…）不在列表中但同样可经 URI 直达（scheme 名即命令名，uri.md §3.1）；
 - 注册表在进程启动时装载，修改环境变量需重启容器生效（v1 不做热更新）。

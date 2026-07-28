@@ -203,7 +203,7 @@ Agent 与文件/浏览器的融合点：Agent 在终端里跑，工作目录就�
 | `https://localhost:5173` | 浏览器（本地服务） | `/apps/browser?url=…`，内层经 nginx 通配代理 `/proxy/5173/`，同源无嵌入限制 |
 | `claude:///workspace/proj`、`codex:///…` | Agent | Agent 终端：cwd 为 path、启动对应命令，同经 attach 入口 |
 
-**应用注册表**：内置上表 scheme；通过 `SHELLBASE_APPS_EXTRA`（JSON）注册新 scheme——`terminal` 型（命令模板）或 `url` 型（地址改写）——即可追加自定义 Agent 或任意 web 应用，无需改前端代码。
+**应用注册表（可选）**：终端类 CLI 无需注册——**scheme 名即命令名**，`vim:///workspace/notes.md`、`htop://` 这类 PATH 里有的命令开箱即用（见 uri.md §3.1）；`SHELLBASE_APPS_EXTRA`（JSON）只用于启动页宫格展示、命令别名/固定参数、以及必须注册的 `url` 型应用（地址改写）。
 
 ## 4. 进程模型与 Dockerfile
 

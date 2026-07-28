@@ -24,7 +24,7 @@
 
 | 参数 | 说明 |
 |------|------|
-| `uri` | URL-encoded 的虚拟 URI，仅接受终端类 scheme（`bash://`、`claude://`、`codex://` 及注册表中 `terminal` 型），其余 `400 {"error":"not_terminal_scheme"}` |
+| `uri` | URL-encoded 的虚拟 URI，仅接受终端类 scheme：`bash://`，以及任意"scheme 名即命令名"的 CLI（`claude://`、`codex://`、`vim://`…，见 uri.md §3.1，注册表可提供别名）。`file://`/`https://`/`url` 型 → `400 {"error":"not_terminal_scheme"}`；scheme 对应命令不在 PATH → `400 {"error":"cmd_not_found"}` |
 | `mode` | 可选，`ro` = 只读 attach（`tmux attach -r`），非身份参数 |
 
 行为：

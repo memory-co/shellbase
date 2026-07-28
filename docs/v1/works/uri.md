@@ -44,6 +44,22 @@ https 类装载的是浏览器应用页（design.md §3.4：地址栏 + 内层 i
 - `https://localhost` 与 `https://127.0.0.1` 等价，其余 host 一律按外链处理；
 - `query` 携带 scheme 相关参数：`?tab=<n>` 区分同路径的多个并行实例（身份参数，仅终端/Agent 类 scheme 有意义，见 §4.1）；`?mode=ro` 只读 attach（非身份参数，见 collab.md）。
 
+### 3.1 scheme 名即命令名：CLI 无需注册
+
+终端类 scheme 的解析是**约定优于注册**：`<scheme>:///<path>` 直接解释为"`cd <path>` 后启动命令 `<scheme>`"。`claude://`、`codex://` 并没有任何特殊登记——它们只是恰好叫这个名字的 CLI；PATH 里有的命令都开箱即用，`vim`、`htop`、`lazygit` 同理：
+
+```
+codex:///workspace/myproj      →  cd /workspace/myproj && codex
+claude:///workspace/myproj     →  cd /workspace/myproj && claude
+vim:///workspace/notes.md      →  cd /workspace && vim notes.md    # path 是文件：cwd 取父目录，文件名作参数
+htop://                        →  cd /workspace && htop
+```
+
+- **path 是目录**：cwd = 该目录，命令无参启动；**path 是文件**：cwd = 父目录，文件名作为第一个参数——编辑器类（vim、nano）因此自然可用；
+- **合法性校验**：attach 时后端 `shutil.which(<scheme>)` 确认命令存在于 PATH，不存在 → `400 {"error":"cmd_not_found"}`；
+- **这不是新增权限**：能开 `bash://` 的人本来就能运行任意命令，scheme 只是把"到哪个目录、跑哪个命令"编码进了定位符，能力边界与 design.md §5"能力自觉"一致；
+- `bash://` 是唯一的例外约定：authority 位是会话名而非路径/参数（见上）。
+
 ## 4. 重入：URI → state id 的确定性映射
 
 终端类 URI 规范化后，确定性地派生 state id。query 参数分两类：
@@ -83,16 +99,18 @@ codex:///workspace/myproj?tab=2   →  codex-workspace-myproj-2
 - Shell 支持 deep link：`/#open=<encoded-uri>` 进入时自动在新块打开该 URI；块上提供"复制定位符"，把 URI 发给协作者即可让对方打开同一现场；
 - 应用选择器本质是 URI 构造器：选"Codex" + 选目录 = 生成 `codex:///workspace/myproj`。
 
-## 6. 扩展
+## 6. 注册表的角色（可选增强，不是准入门槛）
 
-`SHELLBASE_APPS_EXTRA` 注册新 scheme，两类模板：
+由 §3.1，CLI 类应用**不需要注册**——任意 `<cmd>://` 即用。`SHELLBASE_APPS_EXTRA` 注册表只服务三件事：
 
 ```json
 [
-  { "scheme": "aider",   "type": "terminal", "cmd": "aider", "title": "Aider" },
+  { "scheme": "codex",   "type": "terminal", "title": "Codex", "icon": "..." },
+  { "scheme": "lg",      "type": "terminal", "cmd": "lazygit", "title": "LazyGit" },
   { "scheme": "grafana", "type": "url", "template": "https://localhost:3000/{path}", "title": "Grafana" }
 ]
 ```
 
-- `terminal` 型：解析规则与 `claude://` 相同（path = cwd，派生 state id，无中生有）；
-- `url` 型：纯改写为目标地址后按 §3 的 https 规则处理。
+1. **启动页展示**：注册的 `terminal` 型条目出现在启动页宫格（标题/图标/常用位）；未注册的 CLI 不上宫格，但 URI 直达栏随时可用；
+2. **别名与固定参数**：`cmd` 字段允许 scheme 名 ≠ 实际命令（如 `lg://` → `lazygit`），或携带固定参数；
+3. **`url` 型应用**：改写为目标地址后按 §3 的 https 规则处理——这类没有约定可循，必须注册。
