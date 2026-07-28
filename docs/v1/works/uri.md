@@ -40,7 +40,7 @@
 
 - 终端/Agent 类 scheme 的 **path 表示工作目录**（省略则默认 `/workspace`）；`bash://` 的 authority 位置是**会话名**（`bash://main`、`bash://build`），允许同目录开多个互不相干的终端；
 - `https://localhost` 与 `https://127.0.0.1` 等价，其余 host 一律按外链处理；
-- `query` 携带 scheme 相关参数：`?tab=<n>` 区分同路径的多个并行实例（身份参数，见 §4.1）；`?mode=ro` 只读 attach（非身份参数，见 collab.md）。
+- `query` 携带 scheme 相关参数：`?tab=<n>` 区分同路径的多个并行实例（身份参数，仅终端/Agent 类 scheme 有意义，见 §4.1）；`?mode=ro` 只读 attach（非身份参数，见 collab.md）。
 
 ## 4. 重入：URI → state id 的确定性映射
 
@@ -68,6 +68,8 @@ codex:///workspace/myproj?tab=2   →  codex-workspace-myproj-2
 - 第二个：`codex:///workspace/myproj?tab=2` → 独立的 state、独立的 tmux 会话，与第一个互不相干；
 - 前端应用选择器负责体验：构造 URI 时发现同路径已有存活实例，提示"接入现有会话 / 新开一个"，选后者则自动取最小空闲 `tab` 值；
 - `tab` 是身份的一部分，会随 URI 存进布局、参与分享与重入——`?tab=2` 的块刷新后回到的还是 2 号现场。
+
+复用问题**只存在于终端类 scheme**（`bash://`、`claude://`、`codex://` 及扩展的 `terminal` 型）——因为它们背后是 tmux 会话这份持久现场。`file://`、`https://` 类是无状态引用：同一 URI 开多个块就是各自独立加载，天然不冲突，也就没有 `tab` 的概念。
 
 - 后端 `GET /api/terminals/attach?uri=<encoded>`：规范化 → 派生 id → 查 state，**无则登记**（state 文件记录原始 URI、cwd、启动命令）→ `302 /tty/?arg=<id>`；
 - 于是"重入"就是把同一个 URI 再解析一遍：现场还在则原样接上；容器重启后现场消亡，也能凭 state 里的 URI 重建出同目录、同命令的会话；
