@@ -14,15 +14,16 @@
 
 ## 2. 语法与解析
 
-标准 URI 形态：`scheme://authority/path?query`。前端 Shell 持有解析器，把 URI 翻译成块内 iframe 的实际 `src`：
+标准 URI 形态：`scheme://authority/path?query`。前端 Shell 的解析器**只做四类分流**：
 
 ```
-                     ┌── https(www)  ──▶ /apps/browser?url=…（内层 iframe 直连外链）
-                     ├── https(localhost) ─▶ /apps/browser?url=…（内层经 /proxy/<port>/ 代理）
-块的 URI ──▶ 解析器 ──┼── file://     ──▶ /apps/files?path=…（文件浏览器）
-                     ├── bash://     ──▶ /api/terminals/attach?uri=…（302 → ttyd）
-                     └── claude:// codex:// … ─▶ 同上，Agent 终端
+                       ┌── https(localhost) ─▶ /apps/browser?url=…（本地服务，内层经 /proxy/<port>/ 代理）
+                       ├── https(其余 host) ─▶ /apps/browser?url=…（外部站点，内层 iframe 直连）
+块的 URI ──▶ 前端四分流 ┼── file://          ─▶ /apps/files?path=…（文件浏览器）
+                       └── 其余一切（未知）  ─▶ /api/terminals/attach?uri=…（盲转发，302 → ttyd）
 ```
+
+关键设计：**前端不维护任何终端 scheme 名单**。`bash://`、`claude://`、`vim://`、注册表别名……在前端眼里都是"未知"，一律原样转发给 terminals API，由后端完成 scheme → 命令的适配与合法性裁决（§3.1，错误码见 api/terminals.md）。好处是新增 CLI、加别名、改注册表都不需要前端发版。
 
 https 类装载的是浏览器应用页（design.md §3.4：地址栏 + 内层 iframe），内层目标由 host 决定：外链直连、localhost 走 nginx 通配代理。
 
