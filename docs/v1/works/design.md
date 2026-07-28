@@ -187,7 +187,7 @@ Agent 与文件/浏览器的融合点：Agent 在终端里跑，工作目录就�
 **Shell 层**（顶层页面，Vite + React + TypeScript，保持很薄）：
 
 - 布局模型是**递归二叉分割树**：每个节点要么是横/纵分割（带比例），要么是叶子（一个块）；支持拖拽调整比例、任意块再分割、关闭合并；
-- 空白块显示**应用选择器**——本质是 URI 构造器（选应用 + 填参数 = 生成块的 URI，见 [uri.md](uri.md)），随后块内创建 iframe 装载解析结果；
+- 空白块默认装载**启动页**（`/apps/launcher`，类似浏览器新标签页）：应用宫格 + 各应用最近使用记录，本质是 URI 构造器（选应用/点记录 = 产出块的 URI，见 [uri.md](uri.md) 与 [launcher.md](launcher.md)）；
 - 布局树 + 每块的应用与参数**持久化在后端**（`GET/PUT /api/layout`，防抖全量覆盖，见 [backend.md](backend.md)）——换浏览器、换设备、容器重启后进入，都恢复出一模一样的页面（终端块靠 tmux 恢复现场，天然无损）；
 - 同源 iframe 自动携带认证 Cookie，各应用无需单独处理鉴权。
 
@@ -289,7 +289,8 @@ shellbase/
         ├── design.md       # 本文档
         ├── backend.md      # Python 后端专项设计（状态管理/存储/302 attach）
         ├── collab.md       # 多人协作专项设计（state 共享/布局广播）
-        └── uri.md          # 虚拟 URI 定位符设计（块的身份与重入）
+        ├── uri.md          # 虚拟 URI 定位符设计（块的身份与重入）
+        └── launcher.md     # 启动页设计（应用入口/最近使用记录）
 ```
 
 ## 7. 里程碑
