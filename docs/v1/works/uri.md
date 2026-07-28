@@ -40,16 +40,34 @@
 
 - 终端/Agent 类 scheme 的 **path 表示工作目录**（省略则默认 `/workspace`）；`bash://` 的 authority 位置是**会话名**（`bash://main`、`bash://build`），允许同目录开多个互不相干的终端；
 - `https://localhost` 与 `https://127.0.0.1` 等价，其余 host 一律按外链处理；
-- `query` 携带 scheme 相关参数，如 `?mode=ro`（只读 attach，见 collab.md）。
+- `query` 携带 scheme 相关参数：`?tab=<n>` 区分同路径的多个并行实例（身份参数，见 §4.1）；`?mode=ro` 只读 attach（非身份参数，见 collab.md）。
 
 ## 4. 重入：URI → state id 的确定性映射
 
-终端类 URI 规范化（scheme 小写、路径去尾斜杠、query 剔除非身份参数如 `mode`）后，确定性地派生 state id：
+终端类 URI 规范化后，确定性地派生 state id。query 参数分两类：
+
+- **身份参数**（参与派生，不同值 = 不同现场）：目前只有 `tab`；
+- **非身份参数**（派生前剔除，只影响本次打开方式）：如 `mode=ro`。
+
+规范化规则：scheme 小写、路径去尾斜杠、剔除非身份参数、`tab=1` 视为缺省并省略。
 
 ```
-bash://main                →  bash-main
-claude:///workspace/myproj →  claude-workspace-myproj（超长或含特殊字符时取 slug + 短哈希）
+bash://main                       →  bash-main
+claude:///workspace/myproj        →  claude-workspace-myproj（超长或含特殊字符时取 slug + 短哈希）
+codex:///workspace/myproj         →  codex-workspace-myproj
+codex:///workspace/myproj?tab=2   →  codex-workspace-myproj-2
 ```
+
+### 4.1 同路径多实例：`tab` 参数
+
+确定性映射带来一个必须回答的问题：**同一个目录要起两个 Codex 怎么办？**——`codex:///workspace/myproj` 打开第二次只会 attach 回第一个 tmux 会话（这正是重入语义，默认行为是对的：复用而不是起重）。
+
+要真正并行第二个实例，用 `tab` 显式区分身份：
+
+- 第一个：`codex:///workspace/myproj`（即 `tab=1`，缺省不写）；
+- 第二个：`codex:///workspace/myproj?tab=2` → 独立的 state、独立的 tmux 会话，与第一个互不相干；
+- 前端应用选择器负责体验：构造 URI 时发现同路径已有存活实例，提示"接入现有会话 / 新开一个"，选后者则自动取最小空闲 `tab` 值；
+- `tab` 是身份的一部分，会随 URI 存进布局、参与分享与重入——`?tab=2` 的块刷新后回到的还是 2 号现场。
 
 - 后端 `GET /api/terminals/attach?uri=<encoded>`：规范化 → 派生 id → 查 state，**无则登记**（state 文件记录原始 URI、cwd、启动命令）→ `302 /tty/?arg=<id>`；
 - 于是"重入"就是把同一个 URI 再解析一遍：现场还在则原样接上；容器重启后现场消亡，也能凭 state 里的 URI 重建出同目录、同命令的会话；
