@@ -43,12 +43,35 @@ def window_files() -> list[Path]:
 
 
 def _empty_window(wid: str) -> dict:
+    """空 window：单个启动页块（FlexLayout IJsonModel）。"""
     return {
         "id": wid,
         "name": wid,
         "version": 1,
         "updated_at": now_iso(),
-        "root": {"type": "leaf", "uri": None},
+        "root": {
+            "global": {"tabEnableRename": False, "splitterSize": 4},
+            "borders": [],
+            "layout": {
+                "type": "row",
+                "weight": 100,
+                "children": [
+                    {
+                        "type": "tabset",
+                        "weight": 100,
+                        "children": [
+                            {
+                                "type": "tab",
+                                "id": "t0",
+                                "name": "启动页",
+                                "component": "block",
+                                "config": {"uri": None},
+                            }
+                        ],
+                    }
+                ],
+            },
+        },
     }
 
 
@@ -61,37 +84,51 @@ async def ensure_window_locked(wid: str) -> dict:
     return w
 
 
-def _count_blocks(node) -> int:
+def _walk_tabs(node, out: list[dict]) -> None:
+    """收集布局树中的全部 tab 节点（FlexLayout IJsonModel 的叶子）。"""
     if not isinstance(node, dict):
-        return 0
-    if node.get("type") == "leaf":
-        return 1
-    return sum(_count_blocks(c) for c in node.get("children", []))
+        return
+    if node.get("type") == "tab":
+        out.append(node)
+        return
+    for child in node.get("children") or []:
+        _walk_tabs(child, out)
 
 
-def _validate_tree(node, depth: int = 0) -> None:
-    if depth > MAX_DEPTH:
+def _tabs_of(root) -> list[dict]:
+    if not isinstance(root, dict):
+        return []
+    tabs: list[dict] = []
+    _walk_tabs(root.get("layout"), tabs)
+    for border in root.get("borders") or []:
+        _walk_tabs(border, tabs)
+    return tabs
+
+
+def _count_blocks(root) -> int:
+    return len(_tabs_of(root))
+
+
+def _depth(node, depth: int = 0) -> int:
+    if not isinstance(node, dict) or depth > MAX_DEPTH:
+        return depth
+    children = node.get("children") or []
+    return max((_depth(c, depth + 1) for c in children), default=depth)
+
+
+def _validate_tree(root) -> None:
+    """校验 FlexLayout IJsonModel 的骨架：layout 根 + tab 的 config.uri。"""
+    if not isinstance(root, dict):
+        raise ApiError(400, "bad_tree", "root must be an object")
+    layout = root.get("layout")
+    if not isinstance(layout, dict) or layout.get("type") not in ("row", "col"):
+        raise ApiError(400, "bad_tree", "layout root must be a row/col node")
+    if _depth(layout) > MAX_DEPTH:
         raise ApiError(400, "bad_tree", "tree too deep")
-    if not isinstance(node, dict):
-        raise ApiError(400, "bad_tree", "node must be an object")
-    t = node.get("type")
-    if t == "leaf":
-        uri = node.get("uri")
+    for tab in _tabs_of(root):
+        uri = (tab.get("config") or {}).get("uri")
         if uri is not None and not isinstance(uri, str):
-            raise ApiError(400, "bad_tree", "leaf uri must be string or null")
-    elif t == "split":
-        if node.get("dir") not in ("row", "col"):
-            raise ApiError(400, "bad_tree", "split dir must be row|col")
-        ratio = node.get("ratio")
-        if not isinstance(ratio, (int, float)) or not (0 < ratio < 1):
-            raise ApiError(400, "bad_tree", "ratio must be in (0,1)")
-        children = node.get("children")
-        if not isinstance(children, list) or len(children) != 2:
-            raise ApiError(400, "bad_tree", "split must have exactly 2 children")
-        for c in children:
-            _validate_tree(c, depth + 1)
-    else:
-        raise ApiError(400, "bad_tree", f"unknown node type: {t!r}")
+            raise ApiError(400, "bad_tree", "tab config.uri must be string or null")
 
 
 async def _broadcast(wid: str, message: dict) -> None:

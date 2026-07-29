@@ -231,16 +231,10 @@ def _referenced_uris() -> set[tuple[str, str]]:
         w = read_json(wf)
         if not w:
             continue
-        def walk(node):
-            if not isinstance(node, dict):
-                return
-            if node.get("type") == "leaf":
-                if node.get("uri"):
-                    refs.add((w["id"], node["uri"]))
-            else:
-                for c in node.get("children", []):
-                    walk(c)
-        walk(w.get("root"))
+        for tab in windows._tabs_of(w.get("root")):
+            uri = (tab.get("config") or {}).get("uri")
+            if uri:
+                refs.add((w["id"], uri))
     return refs
 
 
