@@ -2,7 +2,8 @@ import { ChevronDown, Columns2, CornerDownLeft, RotateCw, Rows2, X } from "lucid
 import * as React from "react";
 import { cn } from "@/lib/utils";
 import type { Panel } from "@/lib/grid";
-import { isEditableUri, resolveUri, type AppCommand } from "@/lib/uri";
+import { useShell } from "@/lib/store";
+import { isEditableUri, normalizeInput, resolveUri } from "@/lib/uri";
 
 const HIDE_DELAY = 250;
 
@@ -31,16 +32,14 @@ export const PanelView = React.memo(function PanelView({
   // 面板 URI 被外部改变（应用内导航、协作同步）时同步输入框
   React.useEffect(() => setDraft(panel.uri ?? ""), [panel.uri]);
 
-  // 可编辑（浏览器）面板：iframe 只在首次挂载时用 uri 定 src，之后的跳转
-  // 一律走 postMessage，避免地址栏输入把整个应用重新加载一遍。
-  // 不可编辑（终端/文件等）面板：uri 就是身份，变了必须重挂。
-  const initialSrc = React.useRef(resolveUri(panel.uri, wid, panel.id));
-  const src = editable
-    ? initialSrc.current
-    : resolveUri(panel.uri, wid, panel.id);
-
-  const post = (cmd: AppCommand) =>
-    frame.current?.contentWindow?.postMessage(cmd, location.origin);
+  // src 由 (uri, reloadKey) 决定：uri 变（地址栏跳转）或刷新都重挂 iframe。
+  const [reloadKey, setReloadKey] = React.useState(0);
+  const src = React.useMemo(
+    () => resolveUri(panel.uri, wid, panel.id),
+    // reloadKey 参与依赖以强制重算/重挂
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [panel.uri, wid, panel.id, reloadKey],
+  );
 
   const show = () => {
     window.clearTimeout(hideTimer.current);
@@ -55,15 +54,13 @@ export const PanelView = React.memo(function PanelView({
   };
 
   const submit = () => {
-    const url = draft.trim();
-    if (!url || !editable) return;
-    post({ shellbase: "go", url });
+    if (!editable) return;
+    const url = normalizeInput(draft);
+    if (!url || url === panel.uri) return;
+    useShell.getState().setUri(panel.id, url); // uri 变 → iframe 重挂到新地址
   };
 
-  const reload = () => {
-    if (editable && panel.uri) post({ shellbase: "reload" });
-    else if (frame.current) frame.current.src = frame.current.src;
-  };
+  const reload = () => setReloadKey((k) => k + 1);
 
   return (
     <div

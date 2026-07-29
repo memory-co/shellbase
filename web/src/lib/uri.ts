@@ -60,27 +60,18 @@ export type ShellMessage =
   | { shellbase: "open"; leaf: string; uri: string }
   | { shellbase: "navigate"; leaf: string; uri: string };
 
-/** Shell → 应用：面板 bar 上的指令（统一地址栏，见 design.md §3.6）。 */
-export type AppCommand =
-  | { shellbase: "go"; url: string }
-  | { shellbase: "reload" };
-
 export function postToShell(msg: ShellMessage): void {
   window.parent.postMessage(msg, location.origin);
-}
-
-/** 应用侧订阅 Shell 指令。 */
-export function onShellCommand(handler: (cmd: AppCommand) => void): () => void {
-  const listener = (ev: MessageEvent<AppCommand>) => {
-    if (ev.origin !== location.origin || !ev.data?.shellbase) return;
-    if (ev.data.shellbase === "go" || ev.data.shellbase === "reload")
-      handler(ev.data);
-  };
-  addEventListener("message", listener);
-  return () => removeEventListener("message", listener);
 }
 
 /** 终端类以外的 scheme 是否可在地址栏里编辑跳转。 */
 export function isEditableUri(uri: string | null): boolean {
   return !uri || /^https?:/i.test(uri);
+}
+
+/** 地址栏输入 → URI：无 scheme 的按 https 补全。 */
+export function normalizeInput(input: string): string {
+  const s = input.trim();
+  if (!s) return s;
+  return /^[a-z][a-z0-9+.-]*:/i.test(s) ? s : `https://${s}`;
 }
