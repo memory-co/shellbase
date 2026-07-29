@@ -25,6 +25,7 @@ export const PanelView = React.memo(function PanelView({
   const [draft, setDraft] = React.useState(panel.uri ?? "");
   const frame = React.useRef<HTMLIFrameElement>(null);
   const hideTimer = React.useRef<number | undefined>(undefined);
+  const focused = React.useRef(false);
   const editable = isEditableUri(panel.uri);
 
   // 面板 URI 被外部改变（应用内导航、协作同步）时同步输入框
@@ -45,9 +46,12 @@ export const PanelView = React.memo(function PanelView({
     window.clearTimeout(hideTimer.current);
     setOpen(true);
   };
+  // 离开 bar/方格即收起（输入框聚焦时例外，失焦后再收）
   const scheduleHide = () => {
     window.clearTimeout(hideTimer.current);
-    hideTimer.current = window.setTimeout(() => setOpen(false), HIDE_DELAY);
+    hideTimer.current = window.setTimeout(() => {
+      if (!focused.current) setOpen(false);
+    }, HIDE_DELAY);
   };
 
   const submit = () => {
@@ -68,7 +72,6 @@ export const PanelView = React.memo(function PanelView({
         gridColumn: `${panel.x + 1} / span ${panel.w}`,
         gridRow: `${panel.y + 1} / span ${panel.h}`,
       }}
-      onMouseLeave={scheduleHide}
     >
       <iframe
         ref={frame}
@@ -84,6 +87,7 @@ export const PanelView = React.memo(function PanelView({
           open && "border-border bg-card text-foreground",
         )}
         onMouseEnter={show}
+        onMouseLeave={scheduleHide}
         onClick={() => (open && editable ? submit() : setOpen((v) => !v))}
         title={open ? (editable ? "跳转" : "收起") : "面板控制"}
       >
@@ -107,6 +111,7 @@ export const PanelView = React.memo(function PanelView({
             : "pointer-events-none -translate-y-full opacity-0",
         )}
         onMouseEnter={show}
+        onMouseLeave={scheduleHide}
       >
         <button
           className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-destructive"
@@ -134,9 +139,19 @@ export const PanelView = React.memo(function PanelView({
           onChange={(e) => editable && setDraft(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter") submit();
-            if (e.key === "Escape") setOpen(false);
+            if (e.key === "Escape") {
+              focused.current = false;
+              setOpen(false);
+            }
           }}
-          onFocus={show}
+          onFocus={() => {
+            focused.current = true;
+            show();
+          }}
+          onBlur={() => {
+            focused.current = false;
+            scheduleHide();
+          }}
         />
 
         <button
