@@ -24,6 +24,15 @@ RUN curl -fsSL -o /usr/local/bin/ttyd \
     && chmod +x /usr/local/bin/ttyd \
     && /usr/local/bin/ttyd --version
 
+# 预装 Agent CLI（claude:// 与 codex:// 开箱即用；运行时凭证经 env 注入，
+# 如 ANTHROPIC_API_KEY / OPENAI_API_KEY）
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/* \
+    && npm install -g @anthropic-ai/claude-code @openai/codex \
+    && npm cache clean --force \
+    && claude --version && codex --version
+
 RUN useradd -m -u 1000 shellbase
 
 COPY server/requirements.txt /opt/shellbase/server/requirements.txt
