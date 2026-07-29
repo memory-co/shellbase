@@ -98,9 +98,9 @@ exec tmux new-session -A -s "$1" -c /workspace
 
 ### 4.1 数据模型：window 是可数的资源
 
-window 不是单例——**每张"页面"就是一个 window**，后端存着它的完整状态（布局树 + 每块的 URI），有自己的 id（默认 window `main`；用户可另建 `review`、`ops` 等），存为 `windows/<id>.json`。进入 shellbase 时 URL 决定打开哪个 window（`/#w/<id>`，缺省 `main`）；window id 的语义与终端 URI 一致——**无中生有**：访问一个不存在的 id 即创建一个空 window（单个启动页块）。
+window 不是单例——**每张"页面"就是一个 window**，后端存着它的完整状态（面板布局 + 每块的 URI），有自己的 id（默认 window `main`；用户可另建 `review`、`ops` 等），存为 `windows/<id>.json`。进入 shellbase 时 URL 决定打开哪个 window（`/#w/<id>`，缺省 `main`）；window id 的语义与终端 URI 一致——**无中生有**：访问一个不存在的 id 即创建一个空 window（单个启动页面板）。
 
-每个 window 文件保存一棵分割树（与 design.md §3.6 的递归二叉分割模型一一对应）：
+每个 window 文件保存 **24×16 网格上的矩形剖分**——一组扁平的面板记录（与 design.md §3.6 一一对应）：
 
 ```json
 {
@@ -109,18 +109,20 @@ window 不是单例——**每张"页面"就是一个 window**，后端存着它
   "version": 3,
   "updated_at": "2026-07-27T12:00:00Z",
   "root": {
-    "type": "split", "dir": "row", "ratio": 0.6,
-    "children": [
-      { "type": "leaf", "uri": "bash://" },
-      { "type": "split", "dir": "col", "ratio": 0.5,
-        "children": [
-          { "type": "leaf", "uri": "https://localhost:5173/" },
-          { "type": "leaf", "uri": "claude:///workspace/myproj" }
-        ] }
+    "cols": 24,
+    "rows": 16,
+    "panels": [
+      { "id": "p1", "uri": "file:///workspace",          "x": 0, "y": 0, "w": 5,  "h": 16 },
+      { "id": "p2", "uri": "bash://",                    "x": 5, "y": 0, "w": 19, "h": 8  },
+      { "id": "p3", "uri": "claude:///workspace/myproj", "x": 5, "y": 8, "w": 19, "h": 8  }
     ]
   }
 }
 ```
+
+选扁平网格而非递归分割树的理由：**布局模型是我们自己的，不是某个前端库的内部结构**——
+渲染直接落到 CSS Grid，服务端校验退化为三条纯几何规则（界内、不重叠、面积铺满），
+协作 diff 按 `id` 比对扁平数组即可（uri 未变的面板 iframe 原地保留，不闪断）。
 
 ### 4.2 同步与恢复
 

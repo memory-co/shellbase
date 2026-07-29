@@ -231,8 +231,8 @@ def _referenced_uris() -> set[tuple[str, str]]:
         w = read_json(wf)
         if not w:
             continue
-        for tab in windows._tabs_of(w.get("root")):
-            uri = (tab.get("config") or {}).get("uri")
+        for panel in windows._panels_of(w.get("root")):
+            uri = panel.get("uri")
             if uri:
                 refs.add((w["id"], uri))
     return refs

@@ -4,7 +4,7 @@
 
 **window 是可数的资源**：每张"页面"就是一个 window，后端存着它的完整状态（布局树 + 每块的 URI），id 即身份（默认 window `main`）。前端 URL `/#w/<id>` 决定打开哪个 window，缺省 `main`。id 语义与终端 URI 一致——无中生有：访问未知 id 即得到一个空 window。
 
-window 对象：递归二叉分割的布局树，叶子只存块的 URI（uri.md §5）：
+window 对象：**24×16 网格上的矩形剖分**，每个面板一条扁平记录，只带坐标和块的 URI（uri.md §5）：
 
 ```json
 {
@@ -13,22 +13,26 @@ window 对象：递归二叉分割的布局树，叶子只存块的 URI（uri.md
   "version": 3,
   "updated_at": "2026-07-28T09:00:00Z",
   "root": {
-    "type": "split", "dir": "row", "ratio": 0.6,
-    "children": [
-      { "type": "leaf", "uri": "bash://" },
-      { "type": "split", "dir": "col", "ratio": 0.5,
-        "children": [
-          { "type": "leaf", "uri": "https://localhost:5173/" },
-          { "type": "leaf", "uri": "claude:///workspace/myproj" }
-        ] }
+    "cols": 24,
+    "rows": 16,
+    "panels": [
+      { "id": "p1", "uri": "file:///workspace",           "x": 0,  "y": 0, "w": 5,  "h": 16 },
+      { "id": "p2", "uri": "bash://",                     "x": 5,  "y": 0, "w": 19, "h": 8  },
+      { "id": "p3", "uri": "claude:///workspace/myproj",  "x": 5,  "y": 8, "w": 19, "h": 8  }
     ]
   }
 }
 ```
 
-- `dir`: `row`（左右）| `col`（上下）；`ratio`: 第一个孩子的占比 (0,1)；
-- 空白块（启动页）叶子记为 `{ "type": "leaf", "uri": null }`；
-- `name` 是展示名，可改，不参与身份；id 建 slug 校验（`[a-z0-9-]{1,64}`）。
+- `cols`/`rows` 固定 24×16（网格是逻辑单位，实际像素由容器宽高等分）；
+- `x`/`y` 是左上角格坐标（0 基），`w`/`h` 是跨格数；
+- `uri: null` 表示空白面板（渲染启动页）；
+- `id` 是面板的稳定标识，仅前端用于 diff（uri 未变则 iframe 原地保留，不闪断）；
+- `name` 是 window 展示名，可改，不参与身份；window id 走 slug 校验（`[a-z0-9-]{1,64}`）。
+
+**布局不变量**（服务端校验，见 PUT）：所有面板在界内、两两不重叠、面积之和恰好铺满
+`cols × rows`。由于面板只能由"分割已有面板"产生、关闭时空间被邻居确定性吸收，
+任何合法操作都保持这个不变量。
 
 ## GET /api/windows
 
@@ -57,7 +61,11 @@ window 对象：递归二叉分割的布局树，叶子只存块的 URI（uri.md
 
 - 成功：`204`，落盘（原子写）并向该页面的 `watch` 广播；
 - `version` 不匹配（别的客户端先写了）：`409 {"error":"version_conflict", "current_version": 5}`——调用方应 `GET` 最新树、在其上重放本地改动后重试；
-- 树结构不合法（未知 type、ratio 越界、嵌套超 32 层）：`400 {"error":"bad_tree"}`。
+- 布局不合法：`400 {"error":"bad_layout"}`——三条纯几何规则，`message` 指明违反了哪条：
+  1. **界内**：每个面板满足 `0 ≤ x`、`0 ≤ y`、`x+w ≤ cols`、`y+h ≤ rows`，且 `w ≥ 1`、`h ≥ 1`；
+  2. **不重叠**：任意两个面板的矩形无交集；
+  3. **铺满**：`Σ(w×h) = cols × rows`（配合前两条即等价于恰好铺满）。
+- 面板数上限 64，超出 `400 {"error":"too_many_panels"}`。
 
 前端节流：布局变更（分割/关闭/换应用/拖比例结束）后防抖 ~500ms 再 PUT，拖动过程中不写。
 
