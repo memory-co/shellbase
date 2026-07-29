@@ -80,7 +80,7 @@ export const PanelView = React.memo(function PanelView({
       {/* 触发方格：常态右上角，展开后变为提交/收起 */}
       <button
         className={cn(
-          "absolute right-1 top-1 z-20 flex h-[22px] w-[22px] items-center justify-center rounded-md border border-border/60 bg-card/70 text-muted-foreground backdrop-blur transition-all hover:bg-card hover:text-foreground",
+          "absolute right-1.5 top-1.5 z-20 flex h-7 w-7 items-center justify-center rounded-md border border-border/60 bg-card/70 text-muted-foreground backdrop-blur transition-all hover:bg-card hover:text-foreground",
           open && "border-border bg-card text-foreground",
         )}
         onMouseEnter={show}
@@ -90,19 +90,19 @@ export const PanelView = React.memo(function PanelView({
       >
         {open ? (
           editable ? (
-            <CornerDownLeft className="h-3.5 w-3.5" />
+            <CornerDownLeft className="h-4 w-4" />
           ) : (
-            <ChevronDown className="h-3.5 w-3.5" />
+            <ChevronDown className="h-4 w-4" />
           )
         ) : (
-          <span className="block h-2 w-2 rounded-[3px] bg-current" />
+          <span className="block h-[11px] w-[11px] rounded-[3px] bg-current" />
         )}
       </button>
 
       {/* 控制条：覆盖在 iframe 上方，不挤压内容 */}
       <div
         className={cn(
-          "absolute inset-x-0 top-0 z-10 flex h-8 items-center gap-1 border-b border-border bg-card/95 px-1.5 pr-8 backdrop-blur transition-all duration-150",
+          "absolute inset-x-0 top-0 z-10 flex h-10 items-center gap-1 border-b border-border bg-card/95 px-2 pr-10 backdrop-blur transition-all duration-150",
           open
             ? "translate-y-0 opacity-100"
             : "pointer-events-none -translate-y-full opacity-0",
@@ -111,23 +111,23 @@ export const PanelView = React.memo(function PanelView({
         onMouseLeave={scheduleHide}
       >
         <button
-          className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-destructive"
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-destructive"
           onClick={onClose}
           title="关闭"
         >
-          <X className="h-3.5 w-3.5" />
+          <X className="h-4 w-4" />
         </button>
         <button
-          className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
           onClick={reload}
           title="刷新"
         >
-          <RotateCw className="h-3.5 w-3.5" />
+          <RotateCw className="h-4 w-4" />
         </button>
 
         <input
           className={cn(
-            "h-6 min-w-0 flex-1 rounded border border-input bg-background px-2 font-mono text-[11px] outline-none focus:ring-1 focus:ring-ring",
+            "h-7 min-w-0 flex-1 rounded border border-input bg-background px-2.5 font-mono text-[13px] outline-none focus:ring-1 focus:ring-ring",
             !editable && "cursor-default text-muted-foreground",
           )}
           value={draft}
@@ -152,18 +152,18 @@ export const PanelView = React.memo(function PanelView({
         />
 
         <button
-          className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
           onClick={() => { setOpen(false); onSplit("col"); }}
           title="上下分割"
         >
-          <Rows2 className="h-3.5 w-3.5" />
+          <Rows2 className="h-4 w-4" />
         </button>
         <button
-          className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
           onClick={() => { setOpen(false); onSplit("row"); }}
           title="左右分割"
         >
-          <Columns2 className="h-3.5 w-3.5" />
+          <Columns2 className="h-4 w-4" />
         </button>
       </div>
     </div>
