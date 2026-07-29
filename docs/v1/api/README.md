@@ -33,6 +33,8 @@ FastAPI 提供的全部 HTTP/WS 接口。设计依据见 [works/design.md](../wo
 | | `GET  /api/files/download` | 下载（目录打 zip） |
 | | `POST /api/files/mkdir` / `move` / `delete` | 目录/移动/删除 |
 | | `WS   /api/files/watch` | 文件变更推送 |
+| [env](env.md) | `GET /api/env` | 全局环境变量（脱敏读） |
+| | `PUT /api/env` | 增量写入，同步 tmux 全局环境 |
 | [system](system.md) | `GET /api/system/info` | 资源与版本信息 |
 | | `GET  /api/system/health` | 健康检查（Docker HEALTHCHECK） |
 | | `GET  /api/apps` | 应用注册表（启动页宫格数据源） |

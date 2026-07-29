@@ -45,6 +45,55 @@ export function wsUrl(path: string): string {
   return `${proto}//${location.host}${path}`;
 }
 
+// ---- 类型（对齐 docs/v1/api） ----
+
+export type WindowSummary = {
+  id: string;
+  name: string;
+  updated_at: string;
+  blocks: number;
+};
+
+export type WindowDoc = {
+  id: string;
+  name: string;
+  version: number;
+  updated_at: string;
+  root: unknown; // FlexLayout IJsonModel
+};
+
+export type Terminal = {
+  window: string | null;
+  uri: string | null;
+  kind: "plain" | "agent" | "external";
+  cwd: string | null;
+  cmd: string | null;
+  status: "alive" | "exited";
+  created_at: string | null;
+  last_attached: string | null;
+  clients: number;
+};
+
+export type AppDef = {
+  scheme: string;
+  type: "terminal" | "builtin" | "url";
+  title: string;
+  cmd?: string | null;
+  extra?: boolean;
+};
+
+export type FileEntry = {
+  name: string;
+  type: "dir" | "file";
+  size: number | null;
+  mtime: string;
+  mode?: string;
+  children?: FileEntry[] | null;
+};
+
+export type EnvVar = { preview: string; length: number };
+export type EnvDoc = { updated_at: string; vars: Record<string, EnvVar> };
+
 // ---- recents：前端本地，不跨设备（launcher.md §3.1） ----
 
 export type Recent = { uri: string; last_opened: string; count: number };
@@ -60,8 +109,8 @@ export function loadRecents(): Recent[] {
 }
 
 export function recordRecent(uri: string): void {
-  const list = loadRecents().filter((r) => r.uri !== uri);
   const prev = loadRecents().find((r) => r.uri === uri);
+  const list = loadRecents().filter((r) => r.uri !== uri);
   list.unshift({
     uri,
     last_opened: new Date().toISOString(),

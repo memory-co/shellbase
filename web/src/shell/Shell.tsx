@@ -1,87 +1,57 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { api, recordRecent, wsUrl } from "../shared/api";
-import { isTerminalUri, resolveUri, type ShellMessage } from "../shared/uri";
 import {
-  findLeaf,
-  fromServer,
-  mapTree,
-  openInTree,
-  removeLeaf,
-  splitLeaf,
-  toServer,
-  type Leaf,
-  type Node,
-  type ServerNode,
-  type Split,
-} from "./tree";
-
-type WindowDoc = {
-  id: string;
-  name: string;
-  version: number;
-  root: ServerNode;
-};
+  Actions,
+  DockLocation,
+  Layout,
+  type Action,
+  type TabNode,
+  type TabSetNode,
+} from "flexlayout-react";
+import { LayoutGrid, Loader2, Plus } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { api, recordRecent } from "@/lib/api";
+import { newTab } from "@/lib/flexmodel";
+import { useWindowDoc, useWindowList } from "@/lib/queries";
+import { useShell } from "@/lib/store";
+import { isTerminalUri, type ShellMessage } from "@/lib/uri";
+import { wsUrl } from "@/lib/api";
+import { BlockFrame } from "./BlockFrame";
 
 function widFromHash(): string {
   const m = location.hash.match(/^#w\/([a-z0-9-]{1,64})/);
   return m ? m[1] : "main";
 }
 
+function firstTabset(model: NonNullable<ReturnType<typeof useShell.getState>["model"]>) {
+  let ts: TabSetNode | null = model.getActiveTabset() ?? null;
+  if (!ts) {
+    model.visitNodes((n) => {
+      if (!ts && n.getType() === "tabset") ts = n as TabSetNode;
+    });
+  }
+  return ts;
+}
+
 export function Shell() {
   const [wid, setWid] = useState(widFromHash);
-  const [tree, setTree] = useState<Node | null>(null);
-  const [windows, setWindows] = useState<{ id: string; name: string }[]>([]);
-  const versionRef = useRef(0);
-  const treeRef = useRef<Node | null>(null);
-  const saveTimer = useRef<number | undefined>(undefined);
-  treeRef.current = tree;
+  const { data: doc } = useWindowDoc(wid);
+  const { data: windows } = useWindowList();
+  const model = useShell((s) => s.model);
+  const saving = useShell((s) => s.saving);
 
-  const load = useCallback(async (id: string, keepPrev: boolean) => {
-    const doc = await api<WindowDoc>(`/api/windows/${id}`);
-    versionRef.current = doc.version;
-    setTree((prev) => fromServer(doc.root, id, keepPrev ? prev : null));
-  }, []);
-
-  // ---- 持久化：防抖 500ms 全量 PUT；409 → 拉最新（windows.md） ----
-  const save = useCallback(() => {
-    window.clearTimeout(saveTimer.current);
-    saveTimer.current = window.setTimeout(async () => {
-      const t = treeRef.current;
-      if (!t) return;
-      try {
-        const next = versionRef.current + 1;
-        await api(`/api/windows/${wid}`, {
-          method: "PUT",
-          body: JSON.stringify({ version: next, root: toServer(t) }),
-        });
-        versionRef.current = next;
-      } catch {
-        load(wid, true);
-      }
-    }, 500);
-  }, [wid, load]);
-
-  // ---- 初始加载 / 切换 window ----
+  // 初次加载 / 切换 window → 建 model；后续更新由 WS reconcile 驱动
   useEffect(() => {
-    load(wid, false);
-    api<{ windows: { id: string; name: string }[] }>("/api/windows").then((r) =>
-      setWindows(r.windows),
-    );
-  }, [wid, load]);
-
-  // ---- deep link：#w/<wid>?open=<uri>（uri.md §5） ----
-  const openConsumed = useRef(false);
-  useEffect(() => {
-    if (!tree || openConsumed.current) return;
-    const q = location.hash.split("?")[1];
-    const uri = q ? new URLSearchParams(q).get("open") : null;
-    if (!uri) return;
-    openConsumed.current = true;
-    history.replaceState(null, "", `#w/${wid}`);
-    recordRecent(uri);
-    setTree((t) => (t ? openInTree(t, uri, wid) : t));
-    save();
-  }, [tree, wid, save]);
+    if (!doc) return;
+    const s = useShell.getState();
+    if (s.wid !== wid || !s.model) s.init(wid, doc.root, doc.version);
+  }, [doc, wid]);
 
   useEffect(() => {
     const onHash = () => setWid(widFromHash());
@@ -89,27 +59,51 @@ export function Shell() {
     return () => removeEventListener("hashchange", onHash);
   }, []);
 
-  // ---- watch：版本广播，收到更新即拉新树（collab.md §3） ----
+  // deep link：#w/<wid>?open=<uri>
+  const openConsumed = useRef(false);
+  useEffect(() => {
+    if (!model || openConsumed.current) return;
+    const q = location.hash.split("?")[1];
+    const uri = q ? new URLSearchParams(q).get("open") : null;
+    if (!uri) return;
+    openConsumed.current = true;
+    history.replaceState(null, "", `#w/${wid}`);
+    const ts = firstTabset(model);
+    if (ts) {
+      model.doAction(
+        Actions.addNode(newTab(uri), ts.getId(), DockLocation.CENTER, -1, true),
+      );
+      recordRecent(uri);
+      useShell.getState().save();
+    }
+  }, [model, wid]);
+
+  // watch：版本广播 → 拉最新 reconcile（collab.md §3）
   useEffect(() => {
     let ws: WebSocket | null = null;
     let closed = false;
     let delay = 1000;
     const connect = () => {
       ws = new WebSocket(wsUrl(`/api/windows/${wid}/watch`));
-      ws.onmessage = (ev) => {
+      ws.onmessage = async (ev) => {
         try {
           const msg = JSON.parse(ev.data);
           if (msg.type === "ping") ws?.send(JSON.stringify({ type: "pong" }));
-          if (msg.type === "window_updated" && msg.version > versionRef.current)
-            load(wid, true);
+          if (msg.type === "window_updated") {
+            const s = useShell.getState();
+            if (msg.version > s.version) {
+              const d = await api<{ version: number; root: unknown }>(
+                `/api/windows/${wid}`,
+              );
+              s.reconcile(d.root, d.version);
+            }
+          }
           if (msg.type === "window_deleted") location.hash = "#w/main";
         } catch {
           /* ignore */
         }
       };
-      ws.onopen = () => {
-        delay = 1000;
-      };
+      ws.onopen = () => (delay = 1000);
       ws.onclose = () => {
         if (!closed) setTimeout(connect, (delay = Math.min(delay * 2, 15000)));
       };
@@ -119,77 +113,59 @@ export function Shell() {
       closed = true;
       ws?.close();
     };
-  }, [wid, load]);
+  }, [wid]);
 
-  // ---- 应用块的 postMessage（open / navigate） ----
+  // 应用块 postMessage：open（启动页选定）/ navigate（应用内导航）
   useEffect(() => {
     const onMsg = (ev: MessageEvent<ShellMessage>) => {
       if (ev.origin !== location.origin || !ev.data?.shellbase) return;
-      const { leaf, uri } = ev.data;
-      if (ev.data.shellbase === "open") {
-        recordRecent(uri);
-        setTree((t) =>
-          t
-            ? mapTree(t, (n) =>
-                n.type === "leaf" && n.id === leaf
-                  ? { ...n, uri, src: resolveUri(uri, wid, n.id) }
-                  : n,
-              )
-            : t,
-        );
-        save();
-      } else if (ev.data.shellbase === "navigate") {
-        // 只更新持久化的 uri，不动 iframe src（浏览器/文件应用自身在导航）
-        setTree((t) =>
-          t
-            ? mapTree(t, (n) =>
-                n.type === "leaf" && n.id === leaf ? { ...n, uri } : n,
-              )
-            : t,
-        );
-        save();
-      }
+      const s = useShell.getState();
+      if (ev.data.shellbase === "open") s.openInTab(ev.data.leaf, ev.data.uri);
+      else if (ev.data.shellbase === "navigate")
+        s.navigateTab(ev.data.leaf, ev.data.uri);
     };
     addEventListener("message", onMsg);
     return () => removeEventListener("message", onMsg);
-  }, [wid, save]);
+  }, []);
 
-  // ---- 块操作 ----
-  const doSplit = (id: string, dir: "row" | "col") => {
-    setTree((t) => (t ? splitLeaf(t, id, dir, wid) : t));
-    save();
-  };
+  const factory = useCallback(
+    (node: TabNode) => {
+      const uri = (node.getConfig()?.uri ?? null) as string | null;
+      return <BlockFrame wid={wid} tabId={node.getId()} uri={uri} />;
+    },
+    [wid],
+  );
 
-  const doClose = async (id: string) => {
-    const t = treeRef.current;
-    const leaf = t && findLeaf(t, id);
-    if (!leaf) return;
-    if (isTerminalUri(leaf.uri)) {
-      // 关闭即销毁（backend.md §4.2）
-      if (!confirm(`关闭并销毁会话？\n${leaf.uri}`)) return;
-      try {
-        await api(
-          `/api/windows/${wid}/terminals?uri=${encodeURIComponent(leaf.uri!)}`,
-          { method: "DELETE" },
-        );
-      } catch {
-        /* 已消亡也继续移除块 */
+  // 关闭 tab 前：终端类块先销毁会话（关闭即销毁，backend.md §4.2）
+  const onAction = useCallback(
+    (action: Action): Action | undefined => {
+      if (action.type === Actions.DELETE_TAB && model) {
+        const node = model.getNodeById(action.data.node) as TabNode | undefined;
+        const cfg = (node?.getConfig() ?? {}) as { uri?: string };
+        const uri = cfg.uri;
+        if (isTerminalUri(uri)) {
+          const clients = 0;
+          if (!confirm(`关闭并销毁会话？\n${uri}`)) return undefined;
+          api(
+            `/api/windows/${wid}/terminals?uri=${encodeURIComponent(uri!)}`,
+            { method: "DELETE" },
+          ).catch(() => {});
+          void clients;
+        }
       }
-    }
-    setTree((cur) => (cur ? removeLeaf(cur, id, wid) : cur));
-    save();
-  };
+      return action;
+    },
+    [model, wid],
+  );
 
-  const setRatio = (id: string, ratio: number) => {
-    setTree((t) =>
-      t
-        ? mapTree(t, (n) =>
-            n.type === "split" && n.id === id
-              ? { ...n, ratio: Math.min(0.9, Math.max(0.1, ratio)) }
-              : n,
-          )
-        : t,
+  const addBlock = () => {
+    if (!model) return;
+    const ts = firstTabset(model);
+    if (!ts) return;
+    model.doAction(
+      Actions.addNode(newTab(null), ts.getId(), DockLocation.CENTER, -1, true),
     );
+    useShell.getState().save();
   };
 
   const newWindow = () => {
@@ -198,124 +174,56 @@ export function Shell() {
     else if (id) alert("id 不合法");
   };
 
-  if (!tree) return <div className="shell-loading">加载中…</div>;
   return (
-    <div className="shell">
-      <div className="topbar row">
-        <span className="brand">shellbase</span>
-        <span className="muted">/#w/{wid}</span>
-        <span className="grow" />
-        <select
-          value={wid}
-          onChange={(e) => (location.hash = `#w/${e.target.value}`)}
-        >
-          {windows.map((w) => (
-            <option key={w.id} value={w.id}>
-              {w.name}
-            </option>
-          ))}
-          {windows.every((w) => w.id !== wid) && (
-            <option value={wid}>{wid}</option>
-          )}
-        </select>
-        <button onClick={newWindow}>+ window</button>
-      </div>
-      <div className="canvas">
-        <TreeView
-          node={tree}
-          onSplit={doSplit}
-          onClose={doClose}
-          onRatio={setRatio}
-          onRatioDone={save}
-        />
-      </div>
-    </div>
-  );
-}
-
-type TreeProps = {
-  node: Node;
-  onSplit: (id: string, dir: "row" | "col") => void;
-  onClose: (id: string) => void;
-  onRatio: (id: string, ratio: number) => void;
-  onRatioDone: () => void;
-};
-
-function TreeView(props: TreeProps) {
-  const { node } = props;
-  if (node.type === "leaf") return <LeafView {...props} node={node} />;
-  return <SplitView {...props} node={node} />;
-}
-
-function SplitView(props: TreeProps & { node: Split }) {
-  const { node, onRatio, onRatioDone } = props;
-  const ref = useRef<HTMLDivElement>(null);
-
-  const startDrag = (ev: React.PointerEvent) => {
-    ev.preventDefault();
-    const el = ref.current!;
-    const rect = el.getBoundingClientRect();
-    const move = (e: PointerEvent) => {
-      const ratio =
-        node.dir === "row"
-          ? (e.clientX - rect.left) / rect.width
-          : (e.clientY - rect.top) / rect.height;
-      onRatio(node.id, ratio);
-    };
-    const up = () => {
-      removeEventListener("pointermove", move);
-      removeEventListener("pointerup", up);
-      onRatioDone();
-    };
-    addEventListener("pointermove", move);
-    addEventListener("pointerup", up);
-  };
-
-  return (
-    <div ref={ref} className={`split ${node.dir}`}>
-      <div className="pane" style={{ flexBasis: `${node.ratio * 100}%` }}>
-        <TreeView {...props} node={node.children[0]} />
-      </div>
-      <div className={`divider ${node.dir}`} onPointerDown={startDrag} />
-      <div className="pane" style={{ flexBasis: `${(1 - node.ratio) * 100}%` }}>
-        <TreeView {...props} node={node.children[1]} />
-      </div>
-    </div>
-  );
-}
-
-function LeafView(props: TreeProps & { node: Leaf }) {
-  const { node, onSplit, onClose } = props;
-  return (
-    <div className="leaf">
-      <div className="leaf-bar row">
-        <span className="leaf-uri grow" title={node.uri ?? "启动页"}>
-          {node.uri ?? "启动页"}
+    <div className="flex h-full flex-col">
+      <header className="flex h-10 flex-none items-center gap-2 border-b border-border bg-card px-3">
+        <span className="flex items-center gap-1.5 font-semibold">
+          <LayoutGrid className="h-4 w-4 text-primary" />
+          shellbase
         </span>
-        {node.uri && (
-          <button
-            title="复制定位符"
-            onClick={() =>
-              navigator.clipboard.writeText(
-                `${location.origin}/#w/${widFromHash()}?open=${encodeURIComponent(node.uri!)}`,
-              )
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button variant="ghost" size="sm" className="font-mono text-xs">
+                #{wid}
+              </Button>
             }
-          >
-            ⧉
-          </button>
+          />
+          <DropdownMenuContent>
+            {(windows ?? []).map((w) => (
+              <DropdownMenuItem
+                key={w.id}
+                onClick={() => (location.hash = `#w/${w.id}`)}
+              >
+                <span className="font-mono">{w.name}</span>
+                <span className="ml-auto text-xs text-muted-foreground">
+                  {w.blocks}
+                </span>
+              </DropdownMenuItem>
+            ))}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={newWindow}>
+              <Plus /> 新建 window
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <div className="flex-1" />
+        {saving && (
+          <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
         )}
-        <button title="左右分割" onClick={() => onSplit(node.id, "row")}>
-          ◫
-        </button>
-        <button title="上下分割" onClick={() => onSplit(node.id, "col")}>
-          ⬓
-        </button>
-        <button title="关闭块" onClick={() => onClose(node.id)}>
-          ✕
-        </button>
-      </div>
-      <div className="leaf-body">
-        <iframe key={node.id} src={node.src} title={node.uri ?? "launcher"} />
+        <Button variant="secondary" size="sm" onClick={addBlock}>
+          <Plus className="h-4 w-4" /> 新块
+        </Button>
+      </header>
+      <div className="relative flex-1">
+        {model && (
+          <Layout
+            model={model}
+            factory={factory}
+            onAction={onAction}
+            onModelChange={() => useShell.getState().save()}
+          />
+        )}
       </div>
     </div>
   );

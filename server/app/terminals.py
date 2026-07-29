@@ -131,7 +131,12 @@ def tmux_clients(name: str) -> int:
 
 
 def tmux_create(name: str, cwd: str, cmd: str, arg: str | None) -> None:
+    from . import env as env_mod
+
     args = ["new-session", "-d", "-s", name, "-c", cwd]
+    # 全局环境变量注入（env.md §2 通道 2：兜底 tmux 全局环境未设置的窗口期）
+    for key, value in env_mod.load_vars().items():
+        args += ["-e", f"{key}={value}"]
     if cmd != "bash":
         args.append("--")
         args.append(cmd)

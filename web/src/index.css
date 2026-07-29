@@ -1,0 +1,60 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* shellbase 深色主题（zinc/slate 基调，蓝色主色） */
+@layer base {
+  :root {
+    --background: 222 18% 11%;
+    --foreground: 214 15% 85%;
+    --card: 222 16% 14%;
+    --card-foreground: 214 15% 85%;
+    --popover: 222 18% 13%;
+    --popover-foreground: 214 15% 85%;
+    --primary: 210 90% 56%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 220 14% 20%;
+    --secondary-foreground: 214 15% 85%;
+    --muted: 220 14% 18%;
+    --muted-foreground: 217 11% 58%;
+    --accent: 220 14% 22%;
+    --accent-foreground: 214 15% 90%;
+    --destructive: 0 62% 50%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 220 13% 22%;
+    --input: 220 13% 24%;
+    --ring: 210 90% 56%;
+    --radius: 0.5rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 13px;
+    -webkit-font-smoothing: antialiased;
+  }
+}
+
+/* 细滚动条 */
+@layer utilities {
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    @apply rounded bg-border;
+  }
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}

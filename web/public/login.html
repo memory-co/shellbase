@@ -5,44 +5,74 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>shellbase 登录</title>
   <style>
+    :root {
+      --bg: hsl(222 18% 11%); --card: hsl(222 16% 14%); --fg: hsl(214 15% 85%);
+      --muted: hsl(217 11% 58%); --border: hsl(220 13% 22%); --primary: hsl(210 90% 56%);
+    }
     * { box-sizing: border-box; margin: 0; }
     body {
-      font: 14px/1.5 system-ui, sans-serif; background: #14161a; color: #d7dae0;
-      display: flex; align-items: center; justify-content: center; height: 100vh;
+      font: 13px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+      background: var(--bg); color: var(--fg);
+      display: flex; align-items: center; justify-content: center; min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
     }
-    .card { width: 320px; padding: 28px; background: #1b1e24; border: 1px solid #2c313a; border-radius: 10px; }
-    h1 { font-size: 18px; margin-bottom: 18px; }
+    .card {
+      width: 340px; padding: 28px;
+      background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+      box-shadow: 0 8px 30px rgb(0 0 0 / .35);
+    }
+    .brand { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; font-size: 16px; font-weight: 600; }
+    .brand svg { color: var(--primary); }
+    .hint { color: var(--muted); margin-bottom: 18px; font-size: 12px; }
+    label { display: block; font-size: 11px; font-weight: 500; color: var(--muted); margin-bottom: 6px; }
     input {
-      width: 100%; padding: 8px 10px; margin-bottom: 12px; font: inherit;
-      background: #14161a; color: inherit; border: 1px solid #3a3f47; border-radius: 6px;
+      width: 100%; height: 34px; padding: 0 10px; font: inherit; font-family: ui-monospace, monospace;
+      background: var(--bg); color: inherit; border: 1px solid var(--border); border-radius: 6px;
+      outline: none; transition: border-color .15s;
     }
+    input:focus { border-color: var(--primary); }
     button {
-      width: 100%; padding: 8px; font: inherit; cursor: pointer;
-      background: #2f6fb2; color: #fff; border: 0; border-radius: 6px;
+      width: 100%; height: 34px; margin-top: 14px; font: inherit; font-weight: 500; cursor: pointer;
+      background: var(--primary); color: #fff; border: 0; border-radius: 6px; transition: opacity .15s;
     }
-    .err { color: #e57373; font-size: 12px; min-height: 18px; margin-top: 8px; }
+    button:hover { opacity: .9; }
+    button:disabled { opacity: .6; cursor: default; }
+    .err { color: hsl(0 70% 65%); font-size: 12px; min-height: 18px; margin-top: 10px; }
   </style>
 </head>
 <body>
   <form class="card" id="f">
-    <h1>shellbase</h1>
-    <input id="token" type="password" placeholder="访问令牌（SHELLBASE_TOKEN）" autofocus />
-    <button type="submit">进入</button>
+    <div class="brand">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg>
+      shellbase
+    </div>
+    <p class="hint">终端 · 文件 · 浏览器 · Agent，融合在一块画布上</p>
+    <label for="token">访问令牌</label>
+    <input id="token" type="password" placeholder="SHELLBASE_TOKEN" autofocus autocomplete="current-password" />
+    <button type="submit" id="btn">进入</button>
     <div class="err" id="err"></div>
   </form>
   <script>
-    document.getElementById("f").addEventListener("submit", async (e) => {
+    const f = document.getElementById("f");
+    const err = document.getElementById("err");
+    const btn = document.getElementById("btn");
+    f.addEventListener("submit", async (e) => {
       e.preventDefault();
-      const err = document.getElementById("err");
       err.textContent = "";
-      const res = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token: document.getElementById("token").value }),
-      });
-      if (res.status === 204) location.assign("/");
-      else if (res.status === 429) err.textContent = "尝试太频繁，稍后再试";
-      else err.textContent = "令牌不正确";
+      btn.disabled = true;
+      try {
+        const res = await fetch("/api/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token: document.getElementById("token").value }),
+        });
+        if (res.status === 204) return location.assign("/");
+        err.textContent = res.status === 429 ? "尝试太频繁，请稍后再试" : "令牌不正确";
+      } catch {
+        err.textContent = "网络错误";
+      } finally {
+        btn.disabled = false;
+      }
     });
   </script>
 </body>

@@ -6,7 +6,7 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from . import auth, files, system, terminals, windows
+from . import auth, env, files, system, terminals, windows
 from .state import ApiError, ensure_dirs
 
 app = FastAPI(title="shellbase", docs_url=None, redoc_url=None)
@@ -22,10 +22,12 @@ async def api_error_handler(_request: Request, exc: ApiError):
 @app.on_event("startup")
 async def startup():
     ensure_dirs()
+    env.sync_on_startup()
 
 
 app.include_router(auth.router)
 app.include_router(windows.router)
 app.include_router(terminals.router)
 app.include_router(files.router)
+app.include_router(env.router)
 app.include_router(system.router)
