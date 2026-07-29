@@ -55,10 +55,32 @@ export function uriLabel(uri: string | null): string {
   return base ? `${scheme}: ${base}` : `${scheme}://`;
 }
 
+/** 应用 → Shell：块内产生了新 URI。 */
 export type ShellMessage =
   | { shellbase: "open"; leaf: string; uri: string }
   | { shellbase: "navigate"; leaf: string; uri: string };
 
+/** Shell → 应用：面板 bar 上的指令（统一地址栏，见 design.md §3.6）。 */
+export type AppCommand =
+  | { shellbase: "go"; url: string }
+  | { shellbase: "reload" };
+
 export function postToShell(msg: ShellMessage): void {
   window.parent.postMessage(msg, location.origin);
+}
+
+/** 应用侧订阅 Shell 指令。 */
+export function onShellCommand(handler: (cmd: AppCommand) => void): () => void {
+  const listener = (ev: MessageEvent<AppCommand>) => {
+    if (ev.origin !== location.origin || !ev.data?.shellbase) return;
+    if (ev.data.shellbase === "go" || ev.data.shellbase === "reload")
+      handler(ev.data);
+  };
+  addEventListener("message", listener);
+  return () => removeEventListener("message", listener);
+}
+
+/** 终端类以外的 scheme 是否可在地址栏里编辑跳转。 */
+export function isEditableUri(uri: string | null): boolean {
+  return !uri || /^https?:/i.test(uri);
 }
