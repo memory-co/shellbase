@@ -292,7 +292,8 @@ shellbase/
         │   ├── backend.md  # Python 后端专项设计（状态管理/存储/302 attach）
         │   ├── collab.md   # 多人协作专项设计（state 共享/布局广播）
         │   ├── uri.md      # 虚拟 URI 定位符设计（块的身份与重入）
-        │   └── launcher.md # 启动页设计（应用入口/最近使用记录）
+        │   ├── launcher.md # 启动页设计（应用入口/最近使用记录）
+        │   └── env.md      # 全局环境变量设计（凭证自助配置，新终端生效）
         └── api/            # 接口设计（README 总览 + auth/terminals/windows/files/system）
 ```
 

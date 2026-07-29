@@ -73,6 +73,7 @@ exec tmux new-session -A -s "$1" -c /workspace
 
 ```
 /workspace/.shellbase/state/
+├── env.json                    # 全局环境变量表（见 env.md，0600）
 ├── windows/                    # 每个 window（页面）一个状态文件（§4）
 │   ├── main.json               # 默认 window
 │   └── review.json
