@@ -99,6 +99,15 @@ export const PanelView = React.memo(function PanelView({
         )}
       </button>
 
+      {/* 悬停缓冲区：bar 下方再延伸一个 bar 高度，避免横向移动时轻微下滑就误收 */}
+      {open && (
+        <div
+          className="absolute inset-x-0 top-10 z-10 h-10"
+          onMouseEnter={show}
+          onMouseLeave={scheduleHide}
+        />
+      )}
+
       {/* 控制条：覆盖在 iframe 上方，不挤压内容 */}
       <div
         className={cn(
