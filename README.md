@@ -39,6 +39,6 @@ cd web && npm install && npm run dev
 ├── deploy/             # nginx 模板 / supervisord / entrypoint / tmux.conf
 ├── bin/attach.sh       # ttyd → tmux（校验 state，终端层禁止无中生有）
 ├── server/app/         # FastAPI：auth / windows / terminals / files / system
-├── web/                # 前端：Shell 分割画布 + launcher / files / browser 应用
+├── web/                # 前端：Shell 分割画布 + rich URL bar + files / browser 应用
 └── docs/v1/            # works/ 设计文档 + api/ 接口定义
 ```

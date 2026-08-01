@@ -27,7 +27,7 @@ Docker `HEALTHCHECK` 与外部探活用。**nginx 对此端点放行**（不经 
 
 ## GET /api/apps
 
-应用注册表——启动页宫格与 URI 解析器的数据源（内置应用 + `SHELLBASE_APPS_EXTRA` 合并）：
+应用注册表——URL bar 应用宫格的**冷启动兜底与元数据**来源（内置应用 + `SHELLBASE_APPS_EXTRA` 合并）。宫格平时由最近使用的 scheme 驱动（urlbar.md §2），本列表在毫无使用记录时充当初始内容，并为已注册 scheme 提供标题/图标/别名：
 
 ```json
 {
@@ -44,5 +44,5 @@ Docker `HEALTHCHECK` 与外部探活用。**nginx 对此端点放行**（不经 
 
 - `type: builtin` 的 scheme 由前端固定实现（文件浏览器、浏览器应用）；`terminal` 型统一走 attach 入口；
 - `extra: true` 标记来自 `SHELLBASE_APPS_EXTRA` 的自定义项；
-- 本列表只是**启动页宫格的展示项**，不是终端类 scheme 的白名单——未注册的 CLI（`vim://`、`htop://`…）不在列表中但同样可经 URI 直达（scheme 名即命令名，uri.md §3.1）；
+- 本列表**不是终端类 scheme 的白名单**——未注册的 CLI（`vim://`、`htop://`…）不在列表中，但同样可在 URL bar 直接敲 URI 使用，用过之后凭 recents 自然上宫格（scheme 名即命令名，uri.md §3.1）；
 - 注册表在进程启动时装载，修改环境变量需重启容器生效（v1 不做热更新）。

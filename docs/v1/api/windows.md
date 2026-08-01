@@ -16,9 +16,9 @@ window 对象：**24×16 网格上的矩形剖分**，每个面板一条扁平�
     "cols": 24,
     "rows": 16,
     "panels": [
-      { "id": "p1", "uri": "file:///workspace",           "x": 0,  "y": 0, "w": 5,  "h": 16 },
-      { "id": "p2", "uri": "bash://",                     "x": 5,  "y": 0, "w": 19, "h": 8  },
-      { "id": "p3", "uri": "claude:///workspace/myproj",  "x": 5,  "y": 8, "w": 19, "h": 8  }
+      { "id": "p1", "uri": "file:///workspace",                              "x": 0, "y": 0, "w": 5,  "h": 16 },
+      { "id": "p2", "uri": "bash://?window=main&block=1",                    "x": 5, "y": 0, "w": 19, "h": 8  },
+      { "id": "p3", "uri": "claude:///workspace/myproj?window=main&block=1", "x": 5, "y": 8, "w": 19, "h": 8  }
     ]
   }
 }
@@ -26,7 +26,7 @@ window 对象：**24×16 网格上的矩形剖分**，每个面板一条扁平�
 
 - `cols`/`rows` 固定 24×16（网格是逻辑单位，实际像素由容器宽高等分）；
 - `x`/`y` 是左上角格坐标（0 基），`w`/`h` 是跨格数；
-- `uri: null` 表示空白面板（渲染启动页）；
+- `uri: null` 表示空白面板（渲染 URL bar，urlbar.md）；终端类面板的 `uri` 为**完整形态**（含 `window`/`block` 身份参数，uri.md §4）；
 - `id` 是面板的稳定标识，仅前端用于 diff（uri 未变则 iframe 原地保留，不闪断）；
 - `name` 是 window 展示名，可改，不参与身份；window id 走 slug 校验（`[a-z0-9-]{1,64}`）。
 
@@ -52,7 +52,7 @@ window 对象：**24×16 网格上的矩形剖分**，每个面板一条扁平�
 ## GET /api/windows/{id}
 
 - 已存在：`200` 返回布局对象；
-- 未知 id：**无中生有**——落盘一个空 window（单个 `uri: null` 启动页块，`version: 1`，`name` = id）并返回之。进入 `/#w/xxx` 即创建 window，与终端 URI 的 attach 语义对称；
+- 未知 id：**无中生有**——落盘一个空 window（单个 `uri: null` 空白块，`version: 1`，`name` = id）并返回之。进入 `/#w/xxx` 即创建 window，与终端 URI 的 attach 语义对称；
 - id 不合法（slug 校验不过）：`400 {"error":"bad_window_id"}`。
 
 ## PUT /api/windows/{id}
@@ -65,7 +65,8 @@ window 对象：**24×16 网格上的矩形剖分**，每个面板一条扁平�
   1. **界内**：每个面板满足 `0 ≤ x`、`0 ≤ y`、`x+w ≤ cols`、`y+h ≤ rows`，且 `w ≥ 1`、`h ≥ 1`；
   2. **不重叠**：任意两个面板的矩形无交集；
   3. **铺满**：`Σ(w×h) = cols × rows`（配合前两条即等价于恰好铺满）。
-- 面板数上限 64，超出 `400 {"error":"too_many_panels"}`。
+- 面板数上限 64，超出 `400 {"error":"too_many_panels"}`；
+- **URI 归属校验**：终端类面板的 `uri` 必须是完整形态、且其 `window` 身份参数等于本 window id，否则 `400 {"error":"foreign_terminal_uri"}`——这是 uri.md §4 归属不变量的服务端兜底，保证"关闭即销毁"永远只涉及本 window 的会话。
 
 前端节流：布局变更（分割/关闭/换应用/拖比例结束）后防抖 ~500ms 再 PUT，拖动过程中不写。
 
@@ -73,7 +74,7 @@ window 对象：**24×16 网格上的矩形剖分**，每个面板一条扁平�
 
 删除 window。执行顺序：
 
-1. 对该 window 的全部终端会话按"关闭即销毁"处理（`kill-session` + 删 state）——会话身份含 window，同一 URI 在别的 window 是独立现场，**无跨 window 引用问题**，删就是删；
+1. 对该 window 的全部终端会话按"关闭即销毁"处理（`kill-session` + 删 state）——URI 自含 `window` 身份参数，配合归属不变量（uri.md §4），**无跨 window 引用问题**，删就是删；
 2. 删除 window 文件，向该 window 的 `watch` 广播 `{"type":"window_deleted"}`（正在此 window 的客户端跳回 `main`）。
 
 `main` 不可删除（`400 {"error":"cannot_delete_main"}`）；不存在 → `404`。

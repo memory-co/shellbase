@@ -88,7 +88,7 @@ shellbase = **在任意 VM 上一条 `docker run` 拉起的 Web 工作台**，�
 - nginx 对 `/tty/`、`/api/` 一律走 `auth_request /api/auth/verify`，由 FastAPI 校验 Cookie/Header 中的 token；
 - 静态资源、`/api/auth/login`、`/api/system/health`（Docker 健康检查）放行。
 
-这样 ttyd 自身不需要感知认证，鉴权收敛在一处。
+这样 ttyd 自身不需要感知认证，鉴权收敛在一处（端点与 Cookie 细节见 [api/auth.md](../api/auth.md)）。
 
 关键配置点：
 
@@ -99,10 +99,10 @@ shellbase = **在任意 VM 上一条 `docker run` 拉起的 Web 工作台**，�
 ### 3.2 ttyd + tmux（终端子系统）
 
 - ttyd 以 `ttyd -i 127.0.0.1 -p 7681 -W /opt/shellbase/bin/attach.sh` 启动；
-- `attach.sh` 逻辑：`tmux new-session -A -s main -c /workspace`——存在则 attach，不存在则创建；
+- `attach.sh` 逻辑：先校验会话 state 已登记（backend.md §2.3），再 `tmux new-session -A`——存在则 attach，不存在则创建；
 - 前端**直接以 iframe 装载 ttyd 自带页面**（配合 3.6 的分割布局，终端就是一种可放进块里的应用），不自研终端渲染层；
 - 多终端：URL query 传 `?arg=<session>`，`attach.sh` 据此 attach 不同 tmux 会话——每个终端块一个会话；
-- **会话经 Python 收口**：终端块的 iframe 不直接指向 `/tty/`，而是指向 `/api/windows/{wid}/terminals/attach?uri=<块的 URI>`——FastAPI 借鉴 ttyd `arg` 的语义支持**无中生有**（没见过的 `(window, URI)` 当场登记一条 state，每个面板就是一条 state），再 302 到 ttyd；而底下的终端层不允许无中生有：`attach.sh` 只对已有 state 的会话执行 `tmux new-session -A`。会话身份 = (window, URI)，后端始终掌握每个 window 打开中的全部面板（详见 [backend.md](backend.md) 与 [uri.md](uri.md)）。
+- **会话经 Python 收口**：终端块的 iframe 不直接指向 `/tty/`，而是指向统一 attach 入口 `/api/terminals/attach?uri=<块的完整 URI>`（无中生有登记 state 后 302 到 ttyd；`attach.sh` 只对已有 state 的会话放行）。attach 机制与 state 存储见 [backend.md](backend.md) §2，会话身份（`window`/`block` 身份参数）与重入语义见 [uri.md](uri.md) §4。
 
 选 tmux 而不是裸 pty 的理由：断线重连不丢现场、Agent 长任务不因刷新页面而中断、天然支持多会话；输出历史、注入输入这类程序化需求也由 tmux 自身（`capture-pane`/`send-keys`）在终端内解决，无需平台代劳。
 
@@ -127,19 +127,7 @@ app/
 `SHELLBASE_STATE_DIR`（默认 `/workspace/.shellbase/state`），用户换设备或容器重启后仍能恢复
 一模一样的页面。专项设计见 [backend.md](backend.md)。
 
-**文件 API**（根锚定在 `/workspace`，路径穿越一律 403）：
-
-| 端点 | 功能 |
-|------|------|
-| `GET  /api/files/tree?path=` | 目录列表（名称、类型、大小、mtime、权限） |
-| `GET  /api/files/content?path=` | 读文件（文本直出；二进制/超限返回元信息） |
-| `PUT  /api/files/content` | 写文件（带 mtime 乐观锁，防覆盖终端里的并发修改） |
-| `POST /api/files/upload` | multipart 上传（上限 1GB，与 nginx `client_max_body_size` 对齐） |
-| `GET  /api/files/download?path=` | 下载（目录自动打 zip） |
-| `POST /api/files/mkdir` / `move` / `delete` | 常规操作 |
-| `WS   /api/files/watch` | inotify（watchfiles 库）推送变更，前端文件树实时刷新 |
-
-**Agent API** 详见 3.5。
+**文件 API**：根锚定在 `/workspace`（路径穿越一律 403），提供树 / 读写（mtime 乐观锁）/ 上传下载 / 移动删除，外加 `WS /api/files/watch` 实时推送变更——端点定义见 [api/files.md](../api/files.md)。**Agent API** 详见 3.5。
 
 ### 3.4 浏览器子系统
 
@@ -161,10 +149,7 @@ app/
 
 v1 的 Agent 模型是「**运行在 tmux 会话里的 CLI Agent 进程**」，平台负责拉起、观测、交互，不重新发明 Agent 运行时：
 
-- Agent 会话就是一条 `kind: agent` 的终端注册项（复用 backend.md 的注册/attach/回收机制）：
-  Agent 块的 URI（如 `claude:///workspace/proj`）经统一 attach 入口无中生有——登记 state、以 path 为 cwd 创建 tmux 会话并启动该 Agent 的命令
-  （命令模板来自应用注册表：内置 `claude`、`codex` 等，可经 `SHELLBASE_APPS_EXTRA` 扩展，见 3.6）；
-- `GET /api/terminals`：列出会话及状态（alive / exited，另以 `kind: external` 标记手工创建的 tmux 会话，见 backend.md §7）；
+- Agent 会话就是一条 `kind: agent` 的终端注册项，与普通终端共用同一套 URI attach / 回收机制（`claude://`、`codex://` 走 scheme 名即命令名，无需注册）——机制见 [backend.md](backend.md) §5，URI 语义见 [uri.md](uri.md) §3.1，端点见 [api/terminals.md](../api/terminals.md)；
 - 平台**不提供**终端输入/输出接口——与 Agent 的交互就是 attach 进块里直接看、直接敲；程序化需求用 tmux 自身的 `send-keys`/`capture-pane` 在终端里解决（见 api/terminals.md"不做的事"）；
 - Agent 应用块（如 Claude Code、Codex）装载的就是该 tmux 会话的终端——因此"观察 Agent"和"接管操作"是同一个块，无需切换。
 
@@ -196,25 +181,14 @@ Agent 与文件/浏览器的融合点：Agent 在终端里跑，工作目录就�
 - **面板控制条按需浮现**：常态下面板没有标题栏，内容占满，只在右上角留一个小圆角方格；
   鼠标移上去后从顶部滑出一整行 bar（**覆盖**在 iframe 上，不挤压内容），离开 250ms 收起：
   `[✕ 关闭] [⟳ 刷新] [── 统一地址栏 ──] [⬓ 上下分割] [◫ 左右分割] [⏎]`——原方格位置在展开态变为回车提交；
-  - **统一地址栏**：浏览器面板可编辑，回车经 postMessage 让内页跳转（不重载应用，保住内部历史）；
-    终端/文件类面板只读展示 URI。浏览器应用因此不再自带地址栏与前进后退；
+  - **统一地址栏 = rich URL bar**：聚焦展开 recents + 应用宫格、输入即自动补全；浏览器面板经 postMessage 内页跳转（保住内部历史），终端面板改 URI = 销毁重建（提交前确认），手填的 `window`/`block` 一律被 Shell 重写——交互与规则的专项设计见 [urlbar.md](urlbar.md)。浏览器应用因此不再自带地址栏与前进后退；
   - **刷新分流**：浏览器面板让内页 reload；其余面板重挂 iframe（终端是重新 attach，tmux 现场还在）；
   - Shell → 应用的指令通道是 `go` / `reload` 两条 postMessage（见 uri.ts）；
-- 空白块默认装载**启动页**（`/apps/launcher`，类似浏览器新标签页）：应用宫格 + 各应用最近使用记录，本质是 URI 构造器（选应用/点记录 = 产出块的 URI，见 [uri.md](uri.md) 与 [launcher.md](launcher.md)）；
+- 没有独立启动页：空白块只渲染一条自动聚焦的 **rich URL bar**（与面板控制条的地址栏同一组件）——聚焦展示最近使用 + 应用宫格，输入即自动补全，本质是 URI 构造器（选应用/点记录 = 产出块的 URI，见 [uri.md](uri.md) 与 [urlbar.md](urlbar.md)）；
 - 布局树 + 每块的应用与参数**持久化在后端**，且**页面可以有多张**：每张页面是一个有 id 的 **window**，后端存每个 window 的完整状态（`/#w/<id>`，缺省 `main`，未知 id 无中生有），`GET/PUT /api/windows/{id}` 防抖全量覆盖（见 [backend.md](backend.md)）——换浏览器、换设备、容器重启后进入，都恢复出一模一样的页面（终端块靠 tmux 恢复现场，天然无损）；
 - 同源 iframe 自动携带认证 Cookie，各应用无需单独处理鉴权。
 
-**块即 URI**：每个块由一个虚拟 URI 唯一定位（专项设计见 [uri.md](uri.md)），它是块的身份、持久化内容和重入凭证。Shell 的解析器只做**四类分流**——本地服务（https+localhost）、外部站点（https+其余 host）、文件（file://）、其余未知一律转发终端 attach 入口，终端 scheme 的适配与裁决全在后端：
-
-| 块 URI 示例 | 应用 | 解析为 |
-|------|-----|------|
-| `bash:///workspace/proj` | 终端 | `/api/windows/{wid}/terminals/attach?uri=…` → 302 到 ttyd 页面（无中生有，见 backend.md） |
-| `file:///workspace/src` | 文件浏览器 | `/apps/files?path=…`（文件树 + CodeMirror 6 编辑器 + 上传下载，经 `/api/files/watch` 实时刷新） |
-| `https://www.example.com` | 浏览器（外链） | `/apps/browser?url=…`，内层 iframe 直连（见 3.4） |
-| `https://localhost:5173` | 浏览器（本地服务） | `/apps/browser?url=…`，内层经 nginx 通配代理 `/proxy/5173/`，同源无嵌入限制 |
-| `claude:///workspace/proj`、`codex:///…` | Agent | Agent 终端：cwd 为 path、启动对应命令，同经 attach 入口 |
-
-**应用注册表（可选）**：终端类 CLI 无需注册——**scheme 名即命令名**，`vim:///workspace/notes.md`、`htop://` 这类 PATH 里有的命令开箱即用（见 uri.md §3.1）；`SHELLBASE_APPS_EXTRA`（JSON）只用于启动页宫格展示、命令别名/固定参数、以及必须注册的 `url` 型应用（地址改写）。
+**块即 URI**：每个块由一个虚拟 URI 唯一定位——它是块的身份、持久化内容和重入凭证。Shell 的解析器只做**四类分流**：本地服务（https+localhost，经 `/proxy/<port>/` 代理）、外部站点（https+其余 host，iframe 直连）、文件（`file://` → `/apps/files`）、其余未知一律转发终端 attach 入口——终端 scheme 的适配与裁决全在后端（scheme 名即命令名，CLI 无需注册）。scheme 一览、身份参数与规范化、注册表的兜底角色，专项设计见 [uri.md](uri.md)；应用宫格与最近使用见 [urlbar.md](urlbar.md)。
 
 ## 4. 进程模型与 Dockerfile
 
@@ -230,26 +204,9 @@ Agent 与文件/浏览器的融合点：Agent 在终端里跑，工作目录就�
 
 启动顺序：supervisord → fastapi/ttyd → nginx。entrypoint 脚本负责：生成/打印 token、初始化 `/workspace` 权限、渲染 nginx 配置模板（端口等来自环境变量）。
 
-### 4.2 Dockerfile（多阶段）
+### 4.2 基础镜像（多阶段构建）
 
-```dockerfile
-# 阶段1: 前端构建
-FROM node:22-slim AS web
-WORKDIR /src && COPY web/ . && RUN npm ci && npm run build
-
-# 阶段2: 运行时
-FROM debian:bookworm-slim
-RUN apt-get install -y nginx tmux supervisor python3 ...  # + ttyd 二进制
-RUN pip install fastapi uvicorn watchfiles websockets ...
-COPY --from=web /src/dist /opt/shellbase/web
-COPY server/ /opt/shellbase/app
-COPY deploy/nginx.conf.tmpl deploy/supervisord.conf deploy/entrypoint.sh ...
-VOLUME /workspace
-EXPOSE 8080
-ENTRYPOINT ["/opt/shellbase/bin/entrypoint.sh"]
-```
-
-镜像内以非 root 用户 `shellbase` 运行所有进程（nginx 用非特权端口，故无需 root）。
+两阶段：node 阶段编译前端（只有静态产物进运行时），运行时基于 **ubuntu 24.04**（ttyd 可直接 apt）。镜像同时是平台运行时和用户的终端环境——装什么、为什么装、刻意不装什么、非 root 下的扩展路径，专项设计见 [image.md](image.md)。镜像内以非 root 用户 `shellbase`（UID 1000）运行所有进程（nginx 用非特权端口，故无需 root）。
 
 ### 4.3 启动方式
 
@@ -269,7 +226,7 @@ docker run -d --name shellbase \
 | `SHELLBASE_PORT` | `8080` | nginx 监听端口 |
 | `SHELLBASE_WORKSPACE` | `/workspace` | 工作根目录 |
 | `SHELLBASE_STATE_DIR` | `/workspace/.shellbase/state` | 后端状态存储目录（见 backend.md） |
-| `SHELLBASE_APPS_EXTRA` | 空 | JSON，追加自定义应用/Agent（名称 + 命令模板或 URL） |
+| `SHELLBASE_APPS_EXTRA` | 空 | JSON，应用注册表扩展：命令别名/固定参数、宫格冷启动兜底与元数据、`url` 型应用（见 uri.md §6） |
 
 ## 5. 安全设计
 
@@ -304,8 +261,9 @@ shellbase/
         │   ├── backend.md  # Python 后端专项设计（状态管理/存储/302 attach）
         │   ├── collab.md   # 多人协作专项设计（state 共享/布局广播）
         │   ├── uri.md      # 虚拟 URI 定位符设计（块的身份与重入）
-        │   ├── launcher.md # 启动页设计（应用入口/最近使用记录）
-        │   └── env.md      # 全局环境变量设计（凭证自助配置，新终端生效）
+        │   ├── urlbar.md   # rich URL bar 设计（应用入口/最近使用/自动补全）
+        │   ├── env.md      # 全局环境变量设计（凭证自助配置，新终端生效）
+        │   └── image.md    # 基础镜像设计（软件清单/能力边界/扩展路径）
         └── api/            # 接口设计（README 总览 + auth/terminals/windows/files/system）
 ```
 
@@ -316,7 +274,7 @@ shellbase/
 | M1 骨架 | Dockerfile + supervisord + nginx + ttyd(tmux) + FastAPI 健康检查 + token 鉴权 + 分割布局 Shell（终端应用可装块） | 一条 docker run 后登录，任意分割布局并在多个块中使用持久终端 |
 | M2 文件 | 文件 API 全套 + 文件浏览器应用（树/编辑器/上传下载） | 终端改文件 ⇄ 文件块实时可见、可编辑 |
 | M3 浏览器 | 浏览器应用（地址栏/历史/URL 恢复）+ 布局持久化 | 终端块起 dev server，旁边浏览器块预览；刷新页面布局原样恢复 |
-| M4 Agent | Agent 会话（URI attach）+ Claude Code / Codex 应用接入启动页 | 空白块（启动页）选择 Claude Code 即启动会话，块内直接对话、随时接管 |
+| M4 Agent | Agent 会话（URI attach）+ Claude Code / Codex 应用接入 URL bar | 空白块的 URL bar 选择 Claude Code 即启动会话，块内直接对话、随时接管 |
 | M5 打磨 | 断线重连、限流、日志、system info、文档 | 30 分钟断网重连后现场无损 |
 
 ## 8. 主要技术决策记录（ADR 摘要)

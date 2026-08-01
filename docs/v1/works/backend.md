@@ -21,18 +21,18 @@
 
 ### 2.2 方案：attach 入口收口到 Python，语义照搬 ttyd arg
 
-state 的设计**借鉴 ttyd `arg` 的无中生有语义**：attach 入口收到一个没见过的 `(window, URI)` 组合，就**当场登记一条 state**（等价于 `tmux new-session -A` 的"有则 attach、无则创建"），然后 302 到 ttyd。**每个面板就是一条 state**——面板打开的动作本身完成登记，前端无需先走一次显式创建。
+state 的设计**借鉴 ttyd `arg` 的无中生有语义**：attach 入口收到一条没见过的 URI，就**当场登记一条 state**（等价于 `tmux new-session -A` 的"有则 attach、无则创建"），然后 302 到 ttyd。**每个面板就是一条 state**——面板打开的动作本身完成登记，前端无需先走一次显式创建。
 
-**会话身份 = (window, URI)**：URI 在其所属 window 内唯一（重开即重入，`?tab` 区分并行）；同一 URI 在不同 window 是互不相干的两个现场。API 面上没有派生 id——前端只带 URI，内部会话名（tmux 会话、302 目标里的 `arg`）由后端从 `(window, URI)` 确定性派生，纯实现细节。
+**会话身份 = 规范化 URI**：终端 URI 的完整形态自带 `window`/`block` 两个身份参数（uri.md §4），一条 URI 自包含地唯一指认一个现场——同 scheme+path 在不同 window、不同 block 都是互不相干的现场，两个块永远不会意外共享同一个终端。API 面上没有派生 id——前端只带 URI，内部会话名（tmux 会话、302 目标里的 `arg`）由后端从规范化 URI 确定性派生，纯实现细节。缺身份参数的终端 URI 一律 `400`：补全 `window`/`block` 是 Shell 落位的职责，后端只认完整形态。
 
 ```
 前端 Shell                       FastAPI                              ttyd
    │ iframe.src =                   │                                   │
-   │  /api/windows/main/terminals/attach?uri=bash://                    │
-   │───────────────────────────────▶│ (main, bash://) 的 state 有？      │
-   │                                │  ├─ 无 → 写 terminals/main--bash-workspace.json（无中生有）
+   │  /api/terminals/attach?uri=<bash://?window=main&block=1>           │
+   │───────────────────────────────▶│ 该 URI 的 state 有？               │
+   │                                │  ├─ 无 → 写 terminals/main--bash-workspace-1.json（无中生有）
    │                                │  └─ 有 → 更新 last_attached        │
-   │◀─302 /tty/?arg=main--bash-workspace                                │
+   │◀─302 /tty/?arg=main--bash-workspace-1                              │
    │                                │                                   │
    │──(iframe 跟随 302)────────────────────────────────────────────────▶│ attach.sh → tmux
 ```
@@ -61,9 +61,9 @@ exec tmux new-session -A -s "$1" -c /workspace
 
 | 端点 | 功能 |
 |------|------|
-| `GET  /api/windows/{wid}/terminals/attach?uri=` | **唯一 attach 入口**：规范化 URI，以 `(wid, uri)` 查 state → 有则更新 `last_attached`、无则登记（无中生有，state 记录 window/原始 URI/cwd/命令）→ `302 /tty/?arg=<内部会话名>`。前端不感知重入与内部命名，全由后端控制 |
-| `GET  /api/terminals?window=` | 全局观测：state ∪ `tmux ls` 的合并视图，含状态（alive / exited），可按 window 过滤 |
-| `DELETE /api/windows/{wid}/terminals?uri=` | `tmux kill-session` + 移除 state（身份含 window，无跨 window 引用问题） |
+| `GET  /api/terminals/attach?uri=` | **唯一 attach 入口**：规范化 URI（须为完整形态，缺 `window`/`block` → `400`）查 state → 有则更新 `last_attached`、无则登记（无中生有，state 记录 window/原始 URI/cwd/命令）→ `302 /tty/?arg=<内部会话名>`。前端不感知重入与内部命名，全由后端控制 |
+| `GET  /api/terminals?window=` | 全局观测：state ∪ `tmux ls` 的合并视图，含状态（alive / exited），可按 URI 的 `window` 身份参数过滤 |
+| `DELETE /api/terminals?uri=` | `tmux kill-session` + 移除 state（URI 自含 window，配合归属不变量无跨 window 引用问题） |
 
 ## 3. 存储：文件系统，不引数据库
 
@@ -77,13 +77,14 @@ exec tmux new-session -A -s "$1" -c /workspace
 ├── windows/                    # 每个 window（页面）一个状态文件（§4）
 │   ├── main.json               # 默认 window
 │   └── review.json
-├── terminals/                  # 文件名 = 内部会话名（由 window + URI 确定性派生）
-│   ├── main--bash-workspace.json
-│   │                           # {window:"main", uri:"bash://", kind:"plain", created_at, last_attached}
-│   ├── main--codex-workspace-myproj.json
-│   └── review--claude-workspace-myproj.json
-│                               # {window:"review", uri:"claude:///workspace/myproj", kind:"agent",
-│                               #  cwd:"/workspace/myproj", cmd:"claude", ...}
+├── terminals/                  # 文件名 = 内部会话名（由规范化 URI 确定性派生）
+│   ├── main--bash-workspace-1.json
+│   │                           # {window:"main", uri:"bash://?window=main&block=1",
+│   │                           #  kind:"plain", created_at, last_attached}
+│   ├── main--codex-workspace-myproj-1.json
+│   └── review--claude-workspace-myproj-1.json
+│                               # {window:"review", uri:"claude:///workspace/myproj?window=review&block=1",
+│                               #  kind:"agent", cwd:"/workspace/myproj", cmd:"claude", ...}
 ```
 
 ### 3.2 读写纪律
@@ -98,7 +99,7 @@ exec tmux new-session -A -s "$1" -c /workspace
 
 ### 4.1 数据模型：window 是可数的资源
 
-window 不是单例——**每张"页面"就是一个 window**，后端存着它的完整状态（面板布局 + 每块的 URI），有自己的 id（默认 window `main`；用户可另建 `review`、`ops` 等），存为 `windows/<id>.json`。进入 shellbase 时 URL 决定打开哪个 window（`/#w/<id>`，缺省 `main`）；window id 的语义与终端 URI 一致——**无中生有**：访问一个不存在的 id 即创建一个空 window（单个启动页面板）。
+window 不是单例——**每张"页面"就是一个 window**，后端存着它的完整状态（面板布局 + 每块的 URI），有自己的 id（默认 window `main`；用户可另建 `review`、`ops` 等），存为 `windows/<id>.json`。进入 shellbase 时 URL 决定打开哪个 window（`/#w/<id>`，缺省 `main`）；window id 的语义与终端 URI 一致——**无中生有**：访问一个不存在的 id 即创建一个空 window（单个空白面板，渲染 URL bar，见 urlbar.md）。
 
 每个 window 文件保存 **24×16 网格上的矩形剖分**——一组扁平的面板记录（与 design.md §3.6 一一对应）：
 
@@ -112,24 +113,25 @@ window 不是单例——**每张"页面"就是一个 window**，后端存着它
     "cols": 24,
     "rows": 16,
     "panels": [
-      { "id": "p1", "uri": "file:///workspace",          "x": 0, "y": 0, "w": 5,  "h": 16 },
-      { "id": "p2", "uri": "bash://",                    "x": 5, "y": 0, "w": 19, "h": 8  },
-      { "id": "p3", "uri": "claude:///workspace/myproj", "x": 5, "y": 8, "w": 19, "h": 8  }
+      { "id": "p1", "uri": "file:///workspace",                              "x": 0, "y": 0, "w": 5,  "h": 16 },
+      { "id": "p2", "uri": "bash://?window=main&block=1",                    "x": 5, "y": 0, "w": 19, "h": 8  },
+      { "id": "p3", "uri": "claude:///workspace/myproj?window=main&block=1", "x": 5, "y": 8, "w": 19, "h": 8  }
     ]
   }
 }
 ```
 
 选扁平网格而非递归分割树的理由：**布局模型是我们自己的，不是某个前端库的内部结构**——
-渲染直接落到 CSS Grid，服务端校验退化为三条纯几何规则（界内、不重叠、面积铺满），
+渲染直接落到 CSS Grid，服务端校验退化为三条纯几何规则（界内、不重叠、面积铺满）
+外加终端叶子的 URI 归属校验（api/windows.md），
 协作 diff 按 `id` 比对扁平数组即可（uri 未变的面板 iframe 原地保留，不闪断）。
 
 ### 4.2 同步与恢复
 
 - **写**：前端 Shell 在每次布局变更（分割/关闭/换应用/拖比例结束）后，**防抖 ~500ms** 调 `PUT /api/windows/{id}` 全量覆盖；`version` 单调递增，后端拒绝旧版本覆盖新版本（last-write-wins，防两个标签页互相打架时旧页面回写）；
 - **读**：Shell 启动时按 URL 中的 window id `GET /api/windows/{id}` 还原整棵树；
-- **恢复零特判**：还原时每个终端类叶子照常把 iframe 指向 `/api/windows/{wid}/terminals/attach?uri=<叶子的 uri>` 即可——tmux 现场还在则原样接上；会话已消亡（如容器重启）则由无中生有语义自动重建同名会话，块的位置与用途不变，只是 shell 现场从头开始；
-- **关闭即销毁**：用户在网页上关闭一个块，不只是从布局树里摘掉——终端类叶子会同步 `DELETE /api/windows/{wid}/terminals?uri=`（kill tmux 会话 + 删 state 文件），后端资源真正释放；无状态叶子（file/https）只改布局。打开与关闭因此对称：打开 = 无中生有登记，关闭 = 彻底注销。会话身份含 window，删除无需顾虑其他 window；
+- **恢复零特判**：还原时每个终端类叶子照常把 iframe 指向 `/api/terminals/attach?uri=<叶子的完整 uri>` 即可——tmux 现场还在则原样接上；会话已消亡（如容器重启）则由无中生有语义自动重建同名会话，块的位置与用途不变，只是 shell 现场从头开始；
+- **关闭即销毁**：用户在网页上关闭一个块，不只是从布局树里摘掉——终端类叶子会同步 `DELETE /api/terminals?uri=`（kill tmux 会话 + 删 state 文件），后端资源真正释放；无状态叶子（file/https）只改布局。打开与关闭因此对称：打开 = 无中生有登记，关闭 = 彻底注销。归属不变量（叶子 URI 的 `window` = 所在 window，uri.md §4）保证删除只涉及本 window 的会话；
 - localStorage 不再承担布局存储，仅可留作断网时的临时兜底。
 
 | 端点 | 功能 |
@@ -137,14 +139,14 @@ window 不是单例——**每张"页面"就是一个 window**，后端存着它
 | `GET  /api/windows` | 列出全部 window（id、name、updated_at、块数）——回答"当前存在多少个 window" |
 | `GET  /api/windows/{id}` | 读取 window；未知 id 无中生有一个空 window |
 | `PUT  /api/windows/{id}` | 全量写入，`version` 旧于当前则 409 |
-| `DELETE /api/windows/{id}` | 删除 window：先按"关闭即销毁"处理其全部终端块（不被其他 window 引用的会话才杀），再删 window 文件 |
+| `DELETE /api/windows/{id}` | 删除 window：先按"关闭即销毁"处理其全部终端块（归属不变量保证它们只属于本 window，删就是删），再删 window 文件 |
 | `WS   /api/windows/{id}/watch` | 该 window 的版本广播（协作，见 collab.md） |
 
 ## 5. Agent 会话
 
 Agent 会话**就是**一条 `kind: "agent"` 的终端注册项，复用同一套注册/attach/回收机制：
 
-- Agent 块的 URI（`claude:///workspace/proj`、`codex:///…`，见 uri.md）走统一 attach 入口：派生 id、登记 state（记录 cwd 与命令模板）、以该 cwd 创建 tmux 会话并启动应用注册表中该 Agent 的命令；
+- Agent 块的 URI（`claude:///workspace/proj`、`codex:///…`，见 uri.md）走统一 attach 入口：派生 id、登记 state（记录 cwd 与命令）、以该 cwd 创建 tmux 会话并启动 scheme 对应的命令（scheme 名即命令名，注册表别名优先，uri.md §3.1）；
 - 平台不提供 Agent 的输入/输出接口——观察与交互就是 attach 进块里直接看、直接敲（终端 I/O 由用户自行掌控，见 api/terminals.md）；程序化需求用 tmux 自身的 `send-keys`/`capture-pane` 在终端里解决；
 - 前端 Agent 块的 iframe 同样指向统一 attach 入口——观察与接管是同一个块。
 
@@ -169,6 +171,6 @@ state 是共享单元，"打开"只是 attach、不是独占——多个客户�
 
 ## 9. 对 design.md 的影响清单
 
-- §3.2 / §3.6：终端与 Agent 块的 iframe 不再直拼 `/tty/?arg=…`，改为 `/api/windows/{wid}/terminals/attach?uri=…`（302）；`attach.sh` 增加注册表校验；
+- §3.2 / §3.6：终端与 Agent 块的 iframe 不再直拼 `/tty/?arg=…`，改为 `/api/terminals/attach?uri=…`（302）；`attach.sh` 增加注册表校验；
 - §3.6：布局持久化从 localStorage 改为后端 `/api/windows/{id}`（多页面）；
 - §3.5：Agent 会话 API 合并进终端 API（同一注册表，`kind: agent`）。

@@ -2,14 +2,14 @@
 
 设计背景：[works/backend.md](../works/backend.md) §2（无中生有 + 302 attach）、[works/uri.md](../works/uri.md)（URI 语义）、[works/collab.md](../works/collab.md)（共享/只读）。
 
-**标识模型**：终端是 window 的子资源，**会话身份 = (window, URI)**——URI 在其所属 window 内唯一（同 window 重开同一 URI 是重入，`?tab` 区分并行实例）；同一 URI 出现在不同 window 里是**互不相干的两个现场**。API 面上没有派生 id：管理端点一律用 `window` + `uri` 定位，后端内部的 tmux 会话名（302 目标 `/tty/?arg=<内部名>` 中可见）只是实现细节。
+**标识模型**：**会话身份 = 规范化 URI**——终端 URI 的完整形态自带 `window`/`block` 两个身份参数（uri.md §4），一条 URI 自包含地唯一指认一个现场：重开同一条完整 URI 是重入，`block` 不同即互不相干的并行实例，`window` 不同即互不相干的两个现场。API 面上没有派生 id：管理端点一律用 `uri` 定位，后端内部的 tmux 会话名（302 目标 `/tty/?arg=<内部名>` 中可见）只是实现细节。后端只认完整形态——缺身份参数的终端 URI 一律 `400 {"error":"incomplete_uri"}`，补全是前端 Shell 落位的职责。
 
 会话对象（响应中的 `terminal` 结构）：
 
 ```json
 {
   "window": "main",
-  "uri": "codex:///workspace/myproj?tab=2",
+  "uri": "codex:///workspace/myproj?window=main&block=2",
   "kind": "agent",                  // plain | agent | external
   "cwd": "/workspace/myproj",
   "cmd": "codex",                   // plain 会话为 null
@@ -20,7 +20,7 @@
 }
 ```
 
-## GET /api/windows/{wid}/terminals/attach?uri=&mode=
+## GET /api/terminals/attach?uri=&mode=
 
 **唯一 attach 入口**。iframe 的 src 指向这里，不直接指向 `/tty/`。
 
@@ -28,17 +28,17 @@
 
 | 参数 | 说明 |
 |------|------|
-| `uri` | URL-encoded 的虚拟 URI，仅接受终端类 scheme——任意"scheme 名即命令名"的 CLI（`bash://`、`claude://`、`codex://`、`vim://`…，见 uri.md §3.1，注册表可提供别名）。`file://`/`https://`/`url` 型 → `400 {"error":"not_terminal_scheme"}`；scheme 对应命令不在 PATH → `400 {"error":"cmd_not_found"}` |
+| `uri` | URL-encoded 的虚拟 URI，**完整形态**（含 `window`/`block` 身份参数，uri.md §4），仅接受终端类 scheme——任意"scheme 名即命令名"的 CLI（`bash://`、`claude://`、`codex://`、`vim://`…，见 uri.md §3.1，注册表可提供别名）。缺身份参数 → `400 {"error":"incomplete_uri"}`；`file://`/`https://`/`url` 型 → `400 {"error":"not_terminal_scheme"}`；scheme 对应命令不在 PATH → `400 {"error":"cmd_not_found"}` |
 | `mode` | 可选，`ro` = 只读 attach（`tmux attach -r`），非身份参数 |
 
 行为：
 
-1. 规范化 URI（uri.md §4），以 `(wid, uri)` 查 state；
+1. 规范化 URI（uri.md §4），查该 URI 的 state；
 2. 不存在：**无中生有**——写入 state 文件（记录 window、原始 URI、cwd、cmd）；带 cwd/命令的会话同时预创建 tmux 会话并拉起命令。例外：`mode=ro` 时不创建，返回 `404 {"error":"no_such_session"}`；
 3. 已存在：更新 `last_attached`；若 tmux 会话已消亡（status=exited），按 state 记录的 cwd/cmd 重建；
 4. `302 Location: /tty/?arg=<内部会话名>`（`mode=ro` 时附加只读参数）。
 
-`wid` 未知时先无中生有该 window（windows.md），再执行上述流程。
+URI 的 `window` 未知时先无中生有该 window（windows.md），再执行上述流程。
 
 ## GET /api/terminals?window=
 
@@ -49,13 +49,13 @@
 ```
 
 - 用户在终端里手工 `tmux new` 的会话以 `kind: "external"` 出现（无 window/uri），仅展示，不参与恢复；
-- 启动页用 `?window=<当前>` 为 recents 条目标注存活圆点（launcher.md §3.2）。
+- `window` 过滤匹配的是 URI 的 `window` 身份参数。本端点纯属观测与对账（backend.md §7），前端常规路径不依赖它——URL bar 的下拉层是纯本地渲染（urlbar.md §3.2）。
 
-## DELETE /api/windows/{wid}/terminals?uri=
+## DELETE /api/terminals?uri=
 
-销毁会话：`tmux kill-session` + 删除 state 文件 → `204`。不存在 → `404`。正被其他客户端 attach 时同样执行（tmux 会把所有客户端踢出），前端在 `clients > 1` 时应二次确认。
+销毁会话（`uri` 为完整形态）：`tmux kill-session` + 删除 state 文件 → `204`。不存在 → `404`。正被其他客户端 attach 时同样执行（tmux 会把所有客户端踢出），前端在 `clients > 1` 时应二次确认。
 
-这是**用户在网页上关闭终端块的标准动作**：Shell 关闭块时先调本端点销毁会话，再 `PUT /api/windows/{wid}` 移除叶子——"关闭即销毁"，与 attach 的"打开即登记"对称。会话身份含 window，因此**不存在跨 window 引用问题**：删就是删，无需检查别的 window。
+这是**用户在网页上关闭终端块的标准动作**：Shell 关闭块时先调本端点销毁会话，再 `PUT /api/windows/{wid}` 移除叶子——"关闭即销毁"，与 attach 的"打开即登记"对称。归属不变量（块所在 window = URI 的 `window`，uri.md §4）保证**不存在跨 window 引用问题**：删就是删，无需检查别的 window。
 
 ## 不做的事：终端输入/输出
 

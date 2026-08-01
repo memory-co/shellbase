@@ -16,7 +16,7 @@ tmux 的协作哲学是：会话（现场）独立于客户端存在，客户端
 
 ## 2. 终端共享：tmux 天然给的
 
-同一 window 的同一终端 URI 被 N 个浏览器块 attach 时，每个 ttyd 连接各自执行 `attach.sh` → `tmux new-session -A` 挂到**同一个 tmux 会话**：输出对所有客户端实时镜像，任何一方都能输入。这就是 tmux 原生的结对模式，后端零额外工作。（会话身份 = (window, URI)，见 uri.md §4——协作的入口就是进入同一个 window。）
+同一条完整终端 URI 被 N 个浏览器块 attach 时，每个 ttyd 连接各自执行 `attach.sh` → `tmux new-session -A` 挂到**同一个 tmux 会话**：输出对所有客户端实时镜像，任何一方都能输入。这就是 tmux 原生的结对模式，后端零额外工作。（会话身份 = 完整 URI，自含 `window`/`block`，见 uri.md §4——协作的入口就是进入同一个 window、打开同一条 URI；不同客户端打开同一 window 时布局同步，块的 URI 相同，自然 attach 到同一现场。）
 
 两个需要显式定的策略：
 
@@ -27,7 +27,7 @@ tmux 的协作哲学是：会话（现场）独立于客户端存在，客户端
 
 ## 3. 页面共享：同一个 window，所有浏览器同步
 
-window 状态存在服务端（backend.md §4），"多个人打开同一个页面"就是多个浏览器进入同一个 `/#w/<id>`，`GET /api/windows/{id}` 拿到同一棵树；不同 window 之间互不干扰（A 在 `main` 干活，B 在 `review` 看代码，各自独立协作域）。要让同 window 协作是**实时**的，补一条广播通道：
+window 状态存在服务端（backend.md §4），"多个人打开同一个页面"就是多个浏览器进入同一个 `/#w/<id>`，`GET /api/windows/{id}` 拿到同一棵树；不同 window 之间互不干扰（A 在 `main` 干活，B 在 `review` 看代码，各自独立协作域）。这也是 shellbase **唯一的分享形式——分享以 window 为粒度**：把 `/#w/<id>` 链接发出去即可，不支持分享单个块（uri.md §5）——要给同伴看一个终端，就把它所在的 window 给对方。要让同 window 协作是**实时**的，补一条广播通道：
 
 - `WS /api/windows/{id}/watch`：后端在该 window 每次成功写入后，向其所有连接广播新 `version`；
 - 客户端收到大于本地的版本号即拉取新树、重渲染布局——diff 应用：块的 id/应用未变则 iframe **原地保留不重建**，终端不闪断，只有真正新增/关闭/移动的块发生变化；

@@ -68,7 +68,7 @@
 ## 4. 前端：设置应用
 
 配置界面是一个 builtin 应用 `settings://`（与"块即 URI"模型一致，可装进任意块，
-也从 Shell 顶栏和启动页宫格进入），解析为 `/apps/settings`：
+也从 Shell 顶栏和 URL bar 宫格进入），解析为 `/apps/settings`：
 
 - 变量列表：KEY + 掩码后的 value 预览 + 删除按钮；
 - 新增/修改：KEY 输入框 + value 输入框（`type=password`），保存即 `PUT /api/env`；
@@ -88,4 +88,4 @@
 
 - backend.md §3.1：存储树增加 `env.json`；
 - api/：待方案确认后补 `env.md`（端点定义即 §3）；
-- launcher.md / design.md §3.6：应用注册表增加 builtin 的 `settings://`。
+- urlbar.md / design.md §3.6：应用注册表增加 builtin 的 `settings://`。
