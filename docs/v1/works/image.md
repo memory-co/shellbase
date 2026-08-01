@@ -68,7 +68,10 @@ Python 依赖（`server/requirements.txt`，pip 装进 venv）：`fastapi`、`uv
 
 ## 5. 用户、目录与运行约定
 
-- **非 root 运行**：删除 ubuntu 24.04 自带的 `ubuntu`（UID 1000），建同 UID 的 `shellbase` 用户；全部进程（含 nginx，非特权端口）以它运行，无 sudo；
+- **非 root 运行**：删除 ubuntu 24.04 自带的 `ubuntu` 用户，建同 UID 的 `shellbase`；全部进程（含 nginx，非特权端口）以它运行，无 sudo。为什么删：
+  - ubuntu 23.04 起官方 OCI 镜像预置 `ubuntu` 用户占用 **UID 1000**，而 `useradd -u 1000` 遇占用会直接报错——要拿到这个 UID 必须先移走占位者（`userdel -r ubuntu || true`，`|| true` 兜底无此用户的基底）；
+  - 坚持 UID 1000 是为了 **bind mount 属主对齐**：Linux 宿主机第一个普通用户几乎总是 1000，`-v $PWD/workspace:/workspace` 双向读写无 chown 麻烦（Docker Desktop 有映射层不受影响，Linux 服务器是主场景）；
+  - 不复用/不改名 `ubuntu`：终端就是产品界面，提示符与 `$HOME` 该叫 shellbase；docker 版 `ubuntu` 是裸账号，改名保留不了任何东西，删除重建更直白；也不给 shellbase 换 UID 共存——1000 被休眠账号占着，挂载对齐就没了。删后镜像只有一个交互账号，"进程谁在跑、文件归谁"没有第二种答案；
 - 目录布局：`/opt/shellbase/{server,web,deploy,bin,venv,run}` 平台自用（属主 shellbase）；`/workspace` 为挂载卷（`VOLUME`），终端/文件/Agent 共享，state 也在其上（backend.md §3）；
 - `EXPOSE 8080`（`SHELLBASE_PORT` 可改）；`HEALTHCHECK` 打 `/api/system/health`。
 
