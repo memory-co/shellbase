@@ -9,20 +9,17 @@ COPY web/ .
 RUN npm run build
 
 # ---- 阶段 2：运行时 ----
-FROM debian:bookworm-slim
+FROM ubuntu:24.04
 
+ENV DEBIAN_FRONTEND=noninteractive
+
+# ttyd 在 ubuntu 24.04 (noble) universe 仓库里，直接装；其余基础组件同装
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        nginx tmux supervisor \
+        nginx tmux ttyd supervisor \
         python3 python3-venv \
         gettext-base curl ca-certificates git \
-    && rm -rf /var/lib/apt/lists/*
-
-# ttyd 不在 bookworm 仓库，从 GitHub releases 取静态二进制（x86_64 / aarch64 同名规则）
-ARG TTYD_VERSION=1.7.7
-RUN curl -fsSL -o /usr/local/bin/ttyd \
-        "https://github.com/tsl0922/ttyd/releases/download/${TTYD_VERSION}/ttyd.$(uname -m)" \
-    && chmod +x /usr/local/bin/ttyd \
-    && /usr/local/bin/ttyd --version
+    && rm -rf /var/lib/apt/lists/* \
+    && ttyd --version
 
 # 预装 Agent CLI（claude:// 与 codex:// 开箱即用；运行时凭证经 env 注入，
 # 如 ANTHROPIC_API_KEY / OPENAI_API_KEY）
@@ -33,7 +30,8 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && npm cache clean --force \
     && claude --version && codex --version
 
-RUN useradd -m -u 1000 shellbase
+# ubuntu 24.04 自带 UID 1000 的 ubuntu 用户，先移除再建 shellbase
+RUN userdel -r ubuntu 2>/dev/null || true; useradd -m -u 1000 shellbase
 
 COPY server/requirements.txt /opt/shellbase/server/requirements.txt
 RUN python3 -m venv /opt/shellbase/venv \
