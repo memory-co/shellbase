@@ -4,4 +4,4 @@
 until curl -sf http://127.0.0.1:8000/api/system/health >/dev/null 2>&1; do
     sleep 0.2
 done
-exec nginx -c /opt/shellbase/run/nginx.conf -g "daemon off;"
+exec nginx -c "${SHELLBASE_RUN_DIR:-/opt/shellbase/run}/nginx.conf" -g "daemon off;"

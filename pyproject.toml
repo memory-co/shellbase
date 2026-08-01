@@ -1,0 +1,70 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "shellbase"
+version = "0.1.0"
+description = "融合终端平台：CLI Agent + 浏览器 + 文件管理，浏览器里的可分割画布"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "twwwwwy", email = "twwwwwy@gmail.com" }]
+keywords = ["terminal", "tmux", "ttyd", "agent", "workspace", "fastapi"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Environment :: Web Environment",
+    "Framework :: FastAPI",
+    "Intended Audience :: Developers",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: System :: Shells",
+    "Topic :: Terminals :: Terminal Emulators/X Terminals",
+]
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "watchfiles>=0.22",
+    "python-multipart>=0.0.9",
+]
+
+[project.urls]
+Homepage = "https://github.com/memory-co/shellbase"
+Repository = "https://github.com/memory-co/shellbase"
+Issues = "https://github.com/memory-co/shellbase/issues"
+
+[project.scripts]
+shellbase = "shellbase.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["server/shellbase"]
+
+# 前端产物与运行时配置随包分发（wheel 里落在 shellbase/_assets/）。
+# 构建前需先 `cd web && npm install && npm run build` 生成 web/dist。
+[tool.hatch.build.targets.wheel.force-include]
+"web/dist" = "shellbase/_assets/web"
+"deploy/nginx.conf.tmpl" = "shellbase/_assets/deploy/nginx.conf.tmpl"
+"deploy/tmux.conf" = "shellbase/_assets/deploy/tmux.conf"
+"bin/attach.sh" = "shellbase/_assets/bin/attach.sh"
+
+# sdist 里保留 web/dist（虽然被 .gitignore 掉），否则从 sdist 构建 wheel 时
+# 上面的 force-include 会找不到前端产物。
+[tool.hatch.build.targets.sdist]
+ignore-vcs = true
+include = [
+    "/server",
+    "/web",
+    "/deploy",
+    "/bin",
+    "/docs",
+    "/Dockerfile",
+    "/README.md",
+    "/LICENSE",
+]
+exclude = ["/web/node_modules", "__pycache__", "*.pyc"]

@@ -198,7 +198,7 @@ Agent 与文件/浏览器的融合点：Agent 在终端里跑，工作目录就�
 
 ```ini
 [program:nginx]      command=nginx -g 'daemon off;'            priority=30
-[program:fastapi]    command=uvicorn app.main:app --host 127.0.0.1 --port 8000   priority=20
+[program:fastapi]    command=uvicorn shellbase.main:app --host 127.0.0.1 --port 8000   priority=20
 [program:ttyd]       command=ttyd -i 127.0.0.1 -p 7681 -W /opt/shellbase/bin/attach.sh  priority=20
 ```
 

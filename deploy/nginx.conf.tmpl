@@ -1,7 +1,8 @@
 # shellbase 顶层 HTTP 负载（design.md §3.1）。
-# entrypoint 用 envsubst 渲染，只替换 ${SHELLBASE_PORT}；非 root 运行，路径全部落在 /opt/shellbase/run。
+# 由 entrypoint（envsubst）或 `shellbase nginx-conf` 渲染：监听端口、run 目录、前端根目录三个占位。
+# 非 root 运行，pid 与临时文件全部落在 run 目录。
 worker_processes auto;
-pid /opt/shellbase/run/nginx.pid;
+pid ${SHELLBASE_RUN_DIR}/nginx.pid;
 error_log /dev/stderr warn;
 
 events { worker_connections 1024; }
@@ -12,11 +13,11 @@ http {
     access_log /dev/stdout;
     sendfile on;
 
-    client_body_temp_path /opt/shellbase/run/client_body;
-    proxy_temp_path /opt/shellbase/run/proxy;
-    fastcgi_temp_path /opt/shellbase/run/fastcgi;
-    uwsgi_temp_path /opt/shellbase/run/uwsgi;
-    scgi_temp_path /opt/shellbase/run/scgi;
+    client_body_temp_path ${SHELLBASE_RUN_DIR}/client_body;
+    proxy_temp_path ${SHELLBASE_RUN_DIR}/proxy;
+    fastcgi_temp_path ${SHELLBASE_RUN_DIR}/fastcgi;
+    uwsgi_temp_path ${SHELLBASE_RUN_DIR}/uwsgi;
+    scgi_temp_path ${SHELLBASE_RUN_DIR}/scgi;
 
     # 登录接口限速：同 IP 60s 内 10 次（api/auth.md）
     limit_req_zone $binary_remote_addr zone=login:1m rate=10r/m;
@@ -29,7 +30,7 @@ http {
     server {
         listen ${SHELLBASE_PORT};
         client_max_body_size 1g;
-        root /opt/shellbase/web;
+        root ${SHELLBASE_WEB_ROOT};
 
         # ---- 放行名单：登录页、静态资源、login、health ----
         location = /login { try_files /login.html =404; }
