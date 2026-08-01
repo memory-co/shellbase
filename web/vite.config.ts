@@ -11,7 +11,6 @@ export default defineConfig({
     rollupOptions: {
       input: {
         shell: resolve(__dirname, "index.html"),
-        launcher: resolve(__dirname, "apps/launcher.html"),
         files: resolve(__dirname, "apps/files.html"),
         browser: resolve(__dirname, "apps/browser.html"),
         settings: resolve(__dirname, "apps/settings.html"),

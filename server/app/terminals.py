@@ -1,4 +1,4 @@
-"""终端会话：会话身份 = (window, URI)，无中生有 + 302 attach。
+"""终端会话：会话身份 = 规范化 URI（自含 window/block），无中生有 + 302 attach。
 
 设计依据 docs/v1/works/backend.md §2、docs/v1/works/uri.md、docs/v1/api/terminals.md。
 """
@@ -27,39 +27,68 @@ from .state import (
 
 router = APIRouter()
 
-NON_TERMINAL_SCHEMES = {"http", "https", "file"}
+NON_TERMINAL_SCHEMES = {"http", "https", "file", "settings"}
 GC_KEEP_SECONDS = 7 * 24 * 3600
 
 
 # ---- URI 规范化与内部会话名派生（uri.md §4） ----
 
-def parse_terminal_uri(uri: str) -> dict:
+def _split_terminal(uri: str):
+    """拆出终端 URI 的 scheme/path/query；非终端类 scheme 返回 None。"""
     parts = urlsplit(uri)
     scheme = parts.scheme.lower()
     if not scheme or not re.fullmatch(r"[a-z][a-z0-9+.-]*", scheme):
         raise ApiError(400, "bad_uri", f"cannot parse uri: {uri!r}")
-    registry = registry_by_scheme()
-    app = registry.get(scheme)
+    app = registry_by_scheme().get(scheme)
     if scheme in NON_TERMINAL_SCHEMES or (app and app.get("type") != "terminal"):
-        raise ApiError(400, "not_terminal_scheme", f"{scheme}:// is not a terminal scheme")
+        return None
 
     # path 表示工作目录；authority 位并入路径（bash://x 与 bash:///x 等价）
     path = parts.path or ""
     if parts.netloc:
         path = "/" + parts.netloc + path
     path = path.rstrip("/") or str(WORKSPACE)
+    return scheme, app, path, parse_qs(parts.query)
 
-    q = parse_qs(parts.query)
+
+def _identity_of(q: dict, error: str) -> tuple[str, int]:
+    """从 query 提取身份参数 window/block；缺失或非法 → 400 <error>。"""
+    window = (q.get("window") or [None])[0]
+    block_s = (q.get("block") or [None])[0]
+    if not window or not block_s:
+        raise ApiError(400, error, "terminal uri must carry window & block identity params")
+    if not windows.WID_RE.fullmatch(window):
+        raise ApiError(400, error, f"bad window in uri: {window!r}")
     try:
-        tab = int(q.get("tab", ["1"])[0] or "1")
+        block = int(block_s)
     except ValueError:
-        raise ApiError(400, "bad_uri", "tab must be an integer")
-    if tab < 1:
-        raise ApiError(400, "bad_uri", "tab must be >= 1")
+        raise ApiError(400, error, "block must be an integer")
+    if block < 1:
+        raise ApiError(400, error, "block must be >= 1")
+    return window, block
+
+
+def terminal_identity(uri: str) -> tuple[str, int] | None:
+    """布局校验用的轻量解析：非终端叶子返回 None；终端叶子返回 (window, block)。
+
+    终端叶子缺身份参数或参数非法 → 400 foreign_terminal_uri（windows.md 归属校验）。
+    """
+    t = _split_terminal(uri)
+    if t is None:
+        return None
+    return _identity_of(t[3], "foreign_terminal_uri")
+
+
+def parse_terminal_uri(uri: str, check_cmd: bool = True) -> dict:
+    t = _split_terminal(uri)
+    if t is None:
+        raise ApiError(400, "not_terminal_scheme", "not a terminal scheme")
+    scheme, app, path, q = t
+    window, block = _identity_of(q, "incomplete_uri")
 
     # scheme 名即命令名；注册表可提供别名（uri.md §3.1 / §6）
     cmd = (app or {}).get("cmd") or scheme
-    if shutil.which(cmd) is None:
+    if check_cmd and shutil.which(cmd) is None:
         raise ApiError(400, "cmd_not_found", f"command not in PATH: {cmd}")
 
     # path 是文件：cwd 取父目录，文件名作第一个参数（编辑器类因此可用）
@@ -73,11 +102,13 @@ def parse_terminal_uri(uri: str) -> dict:
     else:
         cwd = str(WORKSPACE)
 
-    normalized = f"{scheme}://{path}" + (f"?tab={tab}" if tab > 1 else "")
+    # 完整形态规范化：身份参数始终显式、按 window、block 定序（uri.md §4）
+    normalized = f"{scheme}://{path}?window={window}&block={block}"
     return {
         "scheme": scheme,
         "path": path,
-        "tab": tab,
+        "window": window,
+        "block": block,
         "cmd": cmd,
         "arg": arg,
         "cwd": cwd,
@@ -93,11 +124,8 @@ def _slug(path: str) -> str:
     return s
 
 
-def session_name(wid: str, t: dict) -> str:
-    name = f"{wid}--{t['scheme']}-{_slug(t['path'])}"
-    if t["tab"] > 1:
-        name += f"-{t['tab']}"
-    return name
+def session_name(t: dict) -> str:
+    return f"{t['window']}--{t['scheme']}-{_slug(t['path'])}-{t['block']}"
 
 
 def state_path(name: str) -> Path:
@@ -152,15 +180,16 @@ def tmux_create(name: str, cwd: str, cmd: str, arg: str | None) -> None:
 
 # ---- 端点 ----
 
-@router.get("/api/windows/{wid}/terminals/attach")
-async def attach(wid: str, uri: str, mode: str | None = None):
-    windows.validate_wid(wid)
+@router.get("/api/terminals/attach")
+async def attach(uri: str, mode: str | None = None):
     t = parse_terminal_uri(uri)
-    name = session_name(wid, t)
+    wid = t["window"]
+    name = session_name(t)
     sf = state_path(name)
     ro = mode == "ro"
 
     async with lock:
+        # URI 的 window 未知时先无中生有该 window（api/terminals.md）
         await windows.ensure_window_locked(wid)
         st = read_json(sf)
         if st is None:
@@ -201,15 +230,14 @@ async def list_terminals(window: str | None = None):
     return {"terminals": items}
 
 
-@router.delete("/api/windows/{wid}/terminals", status_code=204)
-async def delete_terminal(wid: str, uri: str):
-    windows.validate_wid(wid)
-    t = parse_terminal_uri(uri)
-    name = session_name(wid, t)
+@router.delete("/api/terminals", status_code=204)
+async def delete_terminal(uri: str):
+    t = parse_terminal_uri(uri, check_cmd=False)
+    name = session_name(t)
     sf = state_path(name)
     async with lock:
         if read_json(sf) is None:
-            raise ApiError(404, "no_such_session", f"no session for {t['uri']} in window {wid}")
+            raise ApiError(404, "no_such_session", f"no session for {t['uri']}")
         _tmux("kill-session", "-t", f"={name}")
         sf.unlink(missing_ok=True)
 
@@ -225,16 +253,21 @@ def destroy_window_terminals(wid: str) -> None:
             sf.unlink(missing_ok=True)
 
 
-def _referenced_uris() -> set[tuple[str, str]]:
-    refs: set[tuple[str, str]] = set()
+def _referenced_uris() -> set[str]:
+    """全部 window 布局引用的终端会话（规范化完整 URI 集合）。"""
+    refs: set[str] = set()
     for wf in windows.window_files():
         w = read_json(wf)
         if not w:
             continue
         for panel in windows._panels_of(w.get("root")):
             uri = panel.get("uri")
-            if uri:
-                refs.add((w["id"], uri))
+            if not uri:
+                continue
+            try:
+                refs.add(parse_terminal_uri(uri, check_cmd=False)["uri"])
+            except ApiError:
+                continue  # 非终端叶子 / 坏 URI：不参与引用判定
     return refs
 
 
@@ -256,11 +289,7 @@ def _reconcile_locked() -> list[dict]:
 
         # GC 兜底：exited 且不被任何 window 引用且超保留期
         if status == "exited":
-            wid = st.get("window")
-            norm = st.get("uri", "")
-            referenced = any(
-                w == wid and _same_identity(norm, u) for (w, u) in refs
-            )
+            referenced = st.get("uri") in refs
             try:
                 last = datetime.fromisoformat(
                     st.get("last_attached", "").replace("Z", "+00:00")
@@ -298,12 +327,3 @@ def _reconcile_locked() -> list[dict]:
             "clients": tmux_clients(name),
         })
     return items
-
-
-def _same_identity(state_uri: str, leaf_uri: str) -> bool:
-    if state_uri == leaf_uri:
-        return True
-    try:
-        return parse_terminal_uri(leaf_uri)["uri"] == state_uri
-    except ApiError:
-        return False

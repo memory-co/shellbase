@@ -8,11 +8,11 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { api, recordRecent, wsUrl } from "@/lib/api";
-import { COLS, ROWS, newId, type Panel } from "@/lib/grid";
-import { useWindowList } from "@/lib/queries";
+import { api, wsUrl } from "@/lib/api";
+import { COLS, ROWS, type Panel } from "@/lib/grid";
+import { deleteTerminal, useWindowList } from "@/lib/queries";
 import { useShell } from "@/lib/store";
-import { type ShellMessage } from "@/lib/uri";
+import { isTerminalUri, type ShellMessage } from "@/lib/uri";
 import { PanelView } from "./PanelView";
 import { Dividers } from "./Dividers";
 
@@ -45,24 +45,7 @@ export function Shell() {
     return () => removeEventListener("hashchange", onHash);
   }, []);
 
-  // deep link：#w/<wid>?open=<uri> —— 分割第一个面板并装载
-  const openConsumed = useRef(false);
-  useEffect(() => {
-    if (openConsumed.current) return;
-    const q = location.hash.split("?")[1];
-    const uri = q ? new URLSearchParams(q).get("open") : null;
-    if (!uri) return;
-    const s = useShell.getState();
-    if (!s.grid.panels.length) return;
-    openConsumed.current = true;
-    history.replaceState(null, "", `#w/${wid}`);
-    const first = s.grid.panels[0];
-    s.split(first.id, "row");
-    // 分割后新面板是最后一个，装载 uri
-    const after = useShell.getState().grid.panels;
-    const created = after[after.length - 1];
-    if (created) s.setUri(created.id, uri);
-  }, [wid]);
+  // 分享是 window 级别的（uri.md §5）：可分享 URL 只有 /#w/<id>，无块级 deep link
 
   // watch：版本广播 → 拉最新 reconcile
   useEffect(() => {
@@ -101,7 +84,7 @@ export function Shell() {
     };
   }, [wid]);
 
-  // 应用块 postMessage：open（启动页选定）/ navigate（应用内导航）
+  // 应用块 postMessage：open（在该块装载新 URI）/ navigate（应用内导航）
   useEffect(() => {
     const onMsg = (ev: MessageEvent<ShellMessage>) => {
       if (ev.origin !== location.origin || !ev.data?.shellbase) return;
@@ -121,15 +104,12 @@ export function Shell() {
   };
 
   const close = useCallback(async (panel: Panel) => {
-    if (panel.uri && !/^(https?|file|settings):/i.test(panel.uri)) {
+    if (isTerminalUri(panel.uri)) {
       if (!confirm(`关闭并销毁会话？\n${panel.uri}`)) return;
-      api(
-        `/api/windows/${wid}/terminals?uri=${encodeURIComponent(panel.uri)}`,
-        { method: "DELETE" },
-      ).catch(() => {});
+      deleteTerminal(panel.uri!).catch(() => {});
     }
     useShell.getState().close(panel.id);
-  }, [wid]);
+  }, []);
 
   return (
     <div className="flex h-full flex-col">
@@ -181,7 +161,6 @@ export function Shell() {
         {grid.panels.map((p) => (
           <PanelView
             key={p.id}
-            wid={wid}
             panel={p}
             onSplit={(dir) => useShell.getState().split(p.id, dir)}
             onClose={() => close(p)}

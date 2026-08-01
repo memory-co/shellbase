@@ -1,44 +1,40 @@
-import { ChevronDown, Columns2, CornerDownLeft, RotateCw, Rows2, X } from "lucide-react";
+import { ChevronDown, Columns2, RotateCw, Rows2, X } from "lucide-react";
 import * as React from "react";
 import { cn } from "@/lib/utils";
 import type { Panel } from "@/lib/grid";
+import { deleteTerminal } from "@/lib/queries";
 import { useShell } from "@/lib/store";
-import { isEditableUri, normalizeInput, resolveUri } from "@/lib/uri";
+import { constructForm, isTerminalUri, resolveUri } from "@/lib/uri";
+import { UrlBar } from "./UrlBar";
 
 const HIDE_DELAY = 250;
 
 /**
  * 一个网格面板：内容占满，控制条按需从顶部滑出覆盖在 iframe 上。
  * 常态只在右上角留一个小圆角方格作为触发点（design.md §3.6）。
+ * 空白面板（uri = null）不装 iframe，直接渲染居中的 rich URL bar（urlbar.md §1）。
  */
 export const PanelView = React.memo(function PanelView({
-  wid,
   panel,
   onSplit,
   onClose,
 }: {
-  wid: string;
   panel: Panel;
   onSplit: (dir: "row" | "col") => void;
   onClose: () => void;
 }) {
   const [open, setOpen] = React.useState(false);
-  const [draft, setDraft] = React.useState(panel.uri ?? "");
   const frame = React.useRef<HTMLIFrameElement>(null);
   const hideTimer = React.useRef<number | undefined>(undefined);
   const focused = React.useRef(false);
-  const editable = isEditableUri(panel.uri);
-
-  // 面板 URI 被外部改变（应用内导航、协作同步）时同步输入框
-  React.useEffect(() => setDraft(panel.uri ?? ""), [panel.uri]);
 
   // src 由 (uri, reloadKey) 决定：uri 变（地址栏跳转）或刷新都重挂 iframe。
   const [reloadKey, setReloadKey] = React.useState(0);
   const src = React.useMemo(
-    () => resolveUri(panel.uri, wid, panel.id),
+    () => (panel.uri ? resolveUri(panel.uri, panel.id) : null),
     // reloadKey 参与依赖以强制重算/重挂
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [panel.uri, wid, panel.id, reloadKey],
+    [panel.uri, panel.id, reloadKey],
   );
 
   const show = () => {
@@ -53,11 +49,25 @@ export const PanelView = React.memo(function PanelView({
     }, HIDE_DELAY);
   };
 
-  const submit = () => {
-    if (!editable) return;
-    const url = normalizeInput(draft);
-    if (!url || url === panel.uri) return;
-    useShell.getState().setUri(panel.id, url); // uri 变 → iframe 重挂到新地址
+  // URL bar 确认：终端块换 URI = 销毁重建，先确认再注销旧现场（urlbar.md §2.1）
+  const openUri = (uri: string) => {
+    if (isTerminalUri(panel.uri)) {
+      if (
+        !confirm(
+          `当前终端现场将被销毁重建，内容会丢失：\n${panel.uri}\n确认继续？`,
+        )
+      )
+        return;
+      deleteTerminal(panel.uri!).catch(() => {});
+    }
+    setOpen(false);
+    useShell.getState().setUri(panel.id, uri);
+  };
+
+  const onBarFocus = (f: boolean) => {
+    focused.current = f;
+    if (f) show();
+    else scheduleHide();
   };
 
   const reload = () => setReloadKey((k) => k + 1);
@@ -70,14 +80,23 @@ export const PanelView = React.memo(function PanelView({
         gridRow: `${panel.y + 1} / span ${panel.h}`,
       }}
     >
-      <iframe
-        ref={frame}
-        src={src}
-        title={panel.uri ?? "launcher"}
-        className="h-full w-full border-0 bg-background"
-      />
+      {src ? (
+        <iframe
+          ref={frame}
+          src={src}
+          title={panel.uri ?? "blank"}
+          className="h-full w-full border-0 bg-background"
+        />
+      ) : (
+        /* 空白面板 = 一条自动聚焦的 rich URL bar，就是块的全部内容 */
+        <div className="flex h-full items-start justify-center overflow-auto p-6 pt-[18vh] scrollbar-thin">
+          <div className="w-full max-w-xl">
+            <UrlBar variant="blank" autoFocus onOpen={openUri} />
+          </div>
+        </div>
+      )}
 
-      {/* 触发方格：常态右上角，展开后变为提交/收起 */}
+      {/* 触发方格：常态右上角，展开后变为收起 */}
       <button
         className={cn(
           "absolute right-1.5 top-1.5 z-20 flex h-7 w-7 items-center justify-center rounded-md border border-border/60 bg-card/70 text-muted-foreground backdrop-blur transition-all hover:bg-card hover:text-foreground",
@@ -85,15 +104,11 @@ export const PanelView = React.memo(function PanelView({
         )}
         onMouseEnter={show}
         onMouseLeave={scheduleHide}
-        onClick={() => (open && editable ? submit() : setOpen((v) => !v))}
-        title={open ? (editable ? "跳转" : "收起") : "面板控制"}
+        onClick={() => setOpen((v) => !v)}
+        title={open ? "收起" : "面板控制"}
       >
         {open ? (
-          editable ? (
-            <CornerDownLeft className="h-4 w-4" />
-          ) : (
-            <ChevronDown className="h-4 w-4" />
-          )
+          <ChevronDown className="h-4 w-4" />
         ) : (
           <span className="block h-[11px] w-[11px] rounded-[3px] bg-current" />
         )}
@@ -134,30 +149,12 @@ export const PanelView = React.memo(function PanelView({
           <RotateCw className="h-4 w-4" />
         </button>
 
-        <input
-          className={cn(
-            "h-7 min-w-0 flex-1 rounded border border-input bg-background px-2.5 font-mono text-[13px] outline-none focus:ring-1 focus:ring-ring",
-            !editable && "cursor-default text-muted-foreground",
-          )}
-          value={draft}
-          readOnly={!editable}
-          placeholder={editable ? "输入网址回车跳转" : ""}
-          onChange={(e) => editable && setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") submit();
-            if (e.key === "Escape") {
-              focused.current = false;
-              setOpen(false);
-            }
-          }}
-          onFocus={() => {
-            focused.current = true;
-            show();
-          }}
-          onBlur={() => {
-            focused.current = false;
-            scheduleHide();
-          }}
+        {/* 统一地址栏 = rich URL bar；placeholder 展示当前 URI 的构造形态 */}
+        <UrlBar
+          variant="bar"
+          placeholder={panel.uri ? constructForm(panel.uri) : undefined}
+          onOpen={openUri}
+          onFocusChange={onBarFocus}
         />
 
         <button

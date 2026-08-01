@@ -32,8 +32,8 @@ export function useTerminals(window?: string) {
   });
 }
 
-export async function deleteTerminal(wid: string, uri: string) {
-  return api(`/api/windows/${wid}/terminals?uri=${encodeURIComponent(uri)}`, {
+export async function deleteTerminal(uri: string) {
+  return api(`/api/terminals?uri=${encodeURIComponent(uri)}`, {
     method: "DELETE",
   });
 }

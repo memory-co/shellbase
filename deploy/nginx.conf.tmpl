@@ -82,7 +82,7 @@ http {
             proxy_read_timeout 24h;
         }
 
-        # 应用页面（iframe 装载）：/apps/launcher → /apps/launcher.html
+        # 应用页面（iframe 装载）：/apps/files → /apps/files.html
         location /apps/ {
             auth_request /api/auth/verify;
             error_page 401 =302 /login;

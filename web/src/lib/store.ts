@@ -8,6 +8,7 @@ import {
   splitPanel,
   type GridRoot,
 } from "./grid";
+import { completeIdentity, constructForm } from "./uri";
 
 // Shell 布局状态归 Zustand；读（windows/terminals/apps）走 TanStack Query。
 // 保存：防抖全量 PUT，version 单调递增，409/失败时拉最新覆盖（windows.md §4.2）。
@@ -20,7 +21,7 @@ type ShellState = {
 
   init: (wid: string, root: unknown, version: number) => void;
   reconcile: (root: unknown, version: number) => void;
-  setUri: (panelId: string, uri: string) => void; // 启动页选定应用
+  setUri: (panelId: string, uri: string) => void; // URL bar 落位（终端类自动补全身份参数）
   navigate: (panelId: string, uri: string) => void; // 应用内导航（不重载）
   split: (panelId: string, dir: "row" | "col") => void;
   close: (panelId: string) => void;
@@ -45,15 +46,21 @@ export const useShell = create<ShellState>((set, get) => ({
   },
 
   setUri: (panelId, uri) => {
-    set((s) => ({
+    // 落位补全：剥离用户手填的身份参数，重写 window/block（urlbar.md §2.2）
+    const s = get();
+    const others = s.grid.panels
+      .filter((p) => p.id !== panelId)
+      .map((p) => p.uri);
+    const full = completeIdentity(uri, s.wid, others);
+    set((st) => ({
       grid: {
-        ...s.grid,
-        panels: s.grid.panels.map((p) =>
-          p.id === panelId ? { ...p, uri } : p,
+        ...st.grid,
+        panels: st.grid.panels.map((p) =>
+          p.id === panelId ? { ...p, uri: full } : p,
         ),
       },
     }));
-    recordRecent(uri);
+    recordRecent(constructForm(full)); // recents 存构造形态（urlbar.md §3.1）
     get().save();
   },
 

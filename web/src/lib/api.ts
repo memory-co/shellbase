@@ -94,7 +94,7 @@ export type FileEntry = {
 export type EnvVar = { preview: string; length: number };
 export type EnvDoc = { updated_at: string; vars: Record<string, EnvVar> };
 
-// ---- recents：前端本地，不跨设备（launcher.md §3.1） ----
+// ---- recents：前端本地，不跨设备（urlbar.md §3.1）；条目存构造形态 ----
 
 export type Recent = { uri: string; last_opened: string; count: number };
 const RECENTS_KEY = "shellbase.recents";

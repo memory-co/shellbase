@@ -48,7 +48,7 @@ MAX_PANELS = 64
 
 
 def _empty_window(wid: str) -> dict:
-    """空 window：一个铺满网格的启动页面板。"""
+    """空 window：一个铺满网格的空白面板（前端渲染 URL bar，urlbar.md）。"""
     return {
         "id": wid,
         "name": wid,
@@ -86,8 +86,8 @@ def _count_blocks(root) -> int:
     return len(_panels_of(root))
 
 
-def _validate_tree(root) -> None:
-    """校验网格布局的三条几何不变量（windows.md：界内 / 不重叠 / 铺满）。"""
+def _validate_tree(wid: str, root) -> None:
+    """校验网格布局：三条几何不变量 + 终端叶子的 URI 归属（windows.md）。"""
     if not isinstance(root, dict):
         raise ApiError(400, "bad_layout", "root must be an object")
     cols = root.get("cols")
@@ -115,6 +115,16 @@ def _validate_tree(root) -> None:
         uri = p.get("uri")
         if uri is not None and not isinstance(uri, str):
             raise ApiError(400, "bad_layout", "panel uri must be string or null")
+        if isinstance(uri, str):
+            # 归属不变量：终端叶子必须是完整形态且 window 参数 = 本 window（uri.md §4）
+            from . import terminals  # 延迟导入避免环
+
+            ident = terminals.terminal_identity(uri)
+            if ident is not None and ident[0] != wid:
+                raise ApiError(
+                    400, "foreign_terminal_uri",
+                    f"panel {pid}: uri belongs to window {ident[0]!r}, not {wid!r}",
+                )
         x, y, w, h = p.get("x"), p.get("y"), p.get("w"), p.get("h")
         if not all(isinstance(v, int) for v in (x, y, w, h)):
             raise ApiError(400, "bad_layout", "panel x/y/w/h must be integers")
@@ -184,7 +194,7 @@ async def put_window(wid: str, body: dict):
     version = body.get("version")
     if not isinstance(version, int):
         raise ApiError(400, "bad_tree", "version must be an integer")
-    _validate_tree(body.get("root"))
+    _validate_tree(wid, body.get("root"))
     async with lock:
         cur = await ensure_window_locked(wid)
         if version != cur["version"] + 1:
