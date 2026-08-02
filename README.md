@@ -99,6 +99,18 @@ cd web && npm install && npm run dev
 
 dev server 上先访问 `/login.html` 用令牌换 Cookie，再回 `/`——鉴权对 dev 同样生效。
 
+## 测试
+
+按场景组织，每个目录一个场景、自带 README 说清边界（见 [tests/](tests/README.md)）：
+
+```bash
+pip install -e ".[dev]"
+pytest                      # 全部
+pytest tests/tty_proxy -v   # 单个场景
+```
+
+不起端口：client 走 `httpx.ASGITransport` 直连 ASGI 应用，反代的上游用假上游顶上。
+
 发布 pip 包前要先构建前端（`cd web && npm run build`），`web/dist` 会被打进 wheel：
 
 ```bash
@@ -114,5 +126,6 @@ python -m build && twine upload dist/*
 ├── bin/attach.sh       # ttyd → tmux（校验 state，终端层禁止无中生有）
 ├── server/shellbase/   # FastAPI：gateway / auth / windows / terminals / files / system + cli
 ├── web/                # 前端：Shell 分割画布 + rich URL bar + files / browser 应用
+├── tests/              # 按场景组织的测试，每个目录一个场景
 └── docs/v1/            # works/ 设计文档 + api/ 接口定义
 ```

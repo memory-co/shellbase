@@ -36,6 +36,9 @@ dependencies = [
     "websockets>=14",       # 同上，websockets.asyncio.client 需要 14+
 ]
 
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-asyncio>=0.23"]
+
 [project.urls]
 Homepage = "https://github.com/memory-co/shellbase"
 Repository = "https://github.com/memory-co/shellbase"
@@ -43,6 +46,11 @@ Issues = "https://github.com/memory-co/shellbase/issues"
 
 [project.scripts]
 shellbase = "shellbase.cli:main"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py", "test.py"]   # 场景住在 <名字>/test.py
 
 [tool.hatch.build.targets.wheel]
 packages = ["server/shellbase"]
@@ -60,6 +68,7 @@ packages = ["server/shellbase"]
 ignore-vcs = true
 include = [
     "/server",
+    "/tests",
     "/web",
     "/deploy",
     "/bin",
