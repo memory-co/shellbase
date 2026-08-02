@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "shellbase"
-version = "0.4.0"
+version = "0.4.1"
 description = "融合终端平台：CLI Agent + 浏览器 + 文件管理，浏览器里的可分割画布"
 readme = "README.md"
 requires-python = ">=3.10"

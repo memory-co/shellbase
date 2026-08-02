@@ -28,14 +28,13 @@ export const PanelView = React.memo(function PanelView({
   const hideTimer = React.useRef<number | undefined>(undefined);
   const focused = React.useRef(false);
 
-  // src 由 (uri, reloadKey) 决定：uri 变（地址栏跳转）或刷新都重挂 iframe。
+  // 刷新只能靠换掉 iframe 元素本身：src 由 (uri, id) 纯算出来，重算出的字符串
+  // 与上次相等，React 不会写这个属性，改 src 那条路走不通。reloadKey 因此接在
+  // 下面的 key 上——key 一变 React 就卸载旧元素、建一个新的，等价于手写
+  // cloneNode + replaceWith，但 sandbox 等属性由 JSX 重新设，不用手工保留。
+  // 用自增而非时间戳：连点两下若落在同一毫秒，时间戳相同就会漏掉一次。
   const [reloadKey, setReloadKey] = React.useState(0);
-  const src = React.useMemo(
-    () => (panel.uri ? resolveUri(panel.uri, panel.id) : null),
-    // reloadKey 参与依赖以强制重算/重挂
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [panel.uri, panel.id, reloadKey],
-  );
+  const src = panel.uri ? resolveUri(panel.uri, panel.id) : null;
 
   const show = () => {
     window.clearTimeout(hideTimer.current);
@@ -82,6 +81,7 @@ export const PanelView = React.memo(function PanelView({
     >
       {src ? (
         <iframe
+          key={reloadKey}
           ref={frame}
           src={src}
           title={panel.uri ?? "blank"}
