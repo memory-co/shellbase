@@ -51,8 +51,9 @@ RUN mkdir -p /workspace \
     && chown -R shellbase:shellbase /opt/shellbase /workspace
 
 USER shellbase
+# 刻意不写死 SHELLBASE_PORT：Cloud Run 等 PaaS 用 PORT 注入端口，
+# 镜像里预置 SHELLBASE_PORT 会让它永远盖过 PORT。默认值 8080 在 cli.py 里。
 ENV SHELLBASE_WORKSPACE=/workspace \
-    SHELLBASE_PORT=8080 \
     SHELLBASE_WEB_ROOT=/opt/shellbase/web \
     SHELLBASE_ATTACH_SH=/opt/shellbase/bin/attach.sh \
     PYTHONPATH=/opt/shellbase/server \
@@ -62,6 +63,6 @@ VOLUME /workspace
 EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
-    CMD curl -sf "http://127.0.0.1:${SHELLBASE_PORT}/api/system/health" || exit 1
+    CMD curl -sf "http://127.0.0.1:${SHELLBASE_PORT:-${PORT:-8080}}/api/system/health" || exit 1
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/opt/shellbase/venv/bin/python", "-m", "shellbase.cli", "up"]
