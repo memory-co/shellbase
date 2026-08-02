@@ -11,6 +11,7 @@
 
 import argparse
 import contextlib
+import json
 import os
 import secrets
 import shutil
@@ -29,6 +30,7 @@ RUN_DIR = Path(
     os.environ.get("SHELLBASE_RUN_DIR") or Path.home() / ".shellbase"
 ).expanduser()
 PID_FILE = RUN_DIR / "shellbase.pid"
+STATE_FILE = RUN_DIR / "instance.json"   # daemon 自报的运行信息，供 status 读
 LOG_FILE = RUN_DIR / "shellbase.log"
 TOKEN_FILE = RUN_DIR / "token"
 
@@ -177,6 +179,7 @@ def _daemon(args) -> int:
     import uvicorn
 
     ttyd = None
+    ttyd_port: int | None = None
     if not args.no_ttyd:
         if shutil.which("ttyd") is None or shutil.which("tmux") is None:
             _warn_no_terminal()          # 降级运行：终端块不可用，其余照常
@@ -199,6 +202,7 @@ def _daemon(args) -> int:
         f"listening on http://{args.host}:{args.port}",
         flush=True,
     )
+    _write_instance(args, ttyd_port)
     try:
         # 兜底：万一还有连接赖着不走，10 秒后强制收摊，别让 Ctrl-C 看起来没反应
         uvicorn.run(
@@ -222,20 +226,63 @@ def _daemon(args) -> int:
 
 # ---- 后台守护：start / stop ----
 
-def _running_pid() -> int | None:
-    """读 PID 文件并确认进程还活着；陈旧的文件顺手清掉。"""
+def _pid_from_file() -> int | None:
     try:
-        pid = int(PID_FILE.read_text().strip())
+        return int(PID_FILE.read_text().strip())
     except (OSError, ValueError):
         return None
+
+
+def _alive(pid: int) -> bool:
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
-        PID_FILE.unlink(missing_ok=True)
-        return None
+        return False
     except PermissionError:
-        return pid  # 别人的进程占着同一个 PID：交给调用方判断
-    return pid
+        return True  # 别人的进程占着同一个 PID，当作还在
+    return True
+
+
+def _running_pid() -> int | None:
+    inst = _instance()
+    return inst["pid"] if inst else None
+
+
+def _write_instance(args, ttyd_port: int | None) -> None:
+    """daemon 把自己的运行信息落下来：status 要看的就是这份。
+
+    前台直接跑 daemon 时也写，因此 `shellbase status` 对两种跑法都成立。
+    """
+    doc = {
+        "pid": os.getpid(),
+        "host": args.host,
+        "port": args.port,
+        "ttyd_port": ttyd_port,
+        "workspace": os.environ.get("SHELLBASE_WORKSPACE", ""),
+        "state_dir": os.environ.get("SHELLBASE_STATE_DIR", ""),
+        "started_at": time.time(),
+    }
+    try:
+        RUN_DIR.mkdir(parents=True, exist_ok=True)
+        STATE_FILE.write_text(json.dumps(doc, ensure_ascii=False, indent=1))
+    except OSError as exc:
+        print(f"shellbase: 运行信息无法写入 {STATE_FILE}（{exc}）", file=sys.stderr)
+
+
+def _instance() -> dict | None:
+    """当前实例的运行信息；没在跑则返回 None（顺手清掉陈旧文件）。"""
+    doc: dict = {}
+    try:
+        doc = json.loads(STATE_FILE.read_text())
+    except (OSError, ValueError):
+        pass
+
+    pid = doc.get("pid") or _pid_from_file()
+    if pid is None or not _alive(pid):
+        PID_FILE.unlink(missing_ok=True)
+        STATE_FILE.unlink(missing_ok=True)
+        return None
+    return {**doc, "pid": pid}
 
 
 def _persistent_token() -> str:
@@ -273,6 +320,121 @@ def _health_ok(port: int) -> bool:
             return resp.status == 200
     except (urllib.error.URLError, OSError):
         return False
+
+
+def _token_accepted(port: int, token: str) -> bool:
+    import urllib.error
+    import urllib.request
+
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{port}/api/auth/verify",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=2) as resp:
+            return resp.status in (200, 204)
+    except (urllib.error.URLError, OSError):
+        return False
+
+
+def _saved_token_if_live(port: int) -> str | None:
+    """落盘的令牌若确实被运行中的实例认，返回它；否则 None。"""
+    try:
+        saved = TOKEN_FILE.read_text().strip()
+    except OSError:
+        return None
+    return saved if saved and _token_accepted(port, saved) else None
+
+
+def _live_token(port: int) -> str:
+    """展示用的令牌。
+
+    落盘的那份不一定就是运行中实例认的那份（`SHELLBASE_TOKEN` 会盖过它，
+    且环境变量给的令牌不落盘），所以先拿去验一下，验过才敢显示。
+    """
+    live = _saved_token_if_live(port)
+    if live:
+        return live
+    if TOKEN_FILE.exists():
+        return "（落盘的那份已失效，实例用的是 SHELLBASE_TOKEN）"
+    return "（由 SHELLBASE_TOKEN 提供，未落盘）"
+
+
+def _human_duration(seconds: float) -> str:
+    s = int(max(0, seconds))
+    d, s = divmod(s, 86400)
+    h, s = divmod(s, 3600)
+    m, s = divmod(s, 60)
+    if d:
+        return f"{d}天{h}小时"
+    if h:
+        return f"{h}小时{m}分"
+    if m:
+        return f"{m}分{s}秒"
+    return f"{s}秒"
+
+
+def _width(s: str) -> int:
+    """终端显示宽度：CJK 占两列。"""
+    return sum(2 if ord(ch) > 0x2E7F else 1 for ch in s)
+
+
+def _display_host(host: str) -> str:
+    return "127.0.0.1" if host in ("0.0.0.0", "::", "") else host
+
+
+def _print_instance(title: str, inst: dict, *, token: str, health: str | None = None) -> None:
+    host = _display_host(inst.get("host", ""))
+    port = inst.get("port")
+    lines = [
+        ("地址", f"http://{host}:{port}"),
+        ("令牌", token),
+    ]
+    if inst.get("workspace"):
+        lines.append(("工作区", inst["workspace"]))
+    ttyd_port = inst.get("ttyd_port")
+    lines.append(("终端", f"ttyd 127.0.0.1:{ttyd_port}" if ttyd_port else "未启用"))
+    if inst.get("started_at"):
+        lines.append(("已运行", _human_duration(time.time() - inst["started_at"])))
+    if health is not None:
+        lines.append(("健康", health))
+    if LOG_FILE.exists():
+        lines.append(("日志", str(LOG_FILE)))
+    lines.append(("停止", "shellbase stop"))
+
+    print(f"{title}（pid {inst['pid']}）")
+    pad = max(_width(label) for label, _ in lines)
+    for label, value in lines:
+        print(f"  {label}{' ' * (pad - _width(label) + 3)}{value}")
+
+
+def _status(args) -> int:
+    inst = _instance()
+    if inst is None:
+        if args.json:
+            print(json.dumps({"running": False}))
+        else:
+            print("shellbase 未在运行")
+        return 1
+
+    health = "ok" if _health_ok(inst.get("port") or 0) else "无响应"
+    if args.json:
+        print(json.dumps({
+            "running": True,
+            "health": health,
+            "url": f"http://{_display_host(inst.get('host', ''))}:{inst.get('port')}",
+            # 验过的才给，验不出（令牌来自环境变量）就是 null —— 给脚本用的字段
+            # 不该塞人话
+            "token": _saved_token_if_live(inst.get("port") or 0),
+            "log": str(LOG_FILE) if LOG_FILE.exists() else None,
+            **inst,
+        }, ensure_ascii=False))
+        return 0
+
+    _print_instance(
+        "shellbase 运行中", inst, token=_live_token(inst.get("port") or 0), health=health
+    )
+    return 0
 
 
 def _start(args) -> int:
@@ -331,12 +493,8 @@ def _start(args) -> int:
         _tail_log()
         return 1
 
-    host = "127.0.0.1" if args.host in ("0.0.0.0", "::") else args.host
-    print(f"shellbase 已启动（pid {child.pid}）")
-    print(f"  地址   http://{host}:{args.port}")
-    print(f"  令牌   {token}")
-    print(f"  日志   {LOG_FILE}")
-    print(f"  停止   shellbase stop")
+    inst = _instance() or {"pid": child.pid, "host": args.host, "port": args.port}
+    _print_instance("shellbase 已启动", inst, token=token)
     return 0
 
 
@@ -365,6 +523,7 @@ def _stop(args) -> int:
             os.kill(pid, 0)
         except ProcessLookupError:
             PID_FILE.unlink(missing_ok=True)
+            STATE_FILE.unlink(missing_ok=True)
             print(f"shellbase 已停止（pid {pid}）")
             return 0
         time.sleep(0.5)
@@ -374,6 +533,7 @@ def _stop(args) -> int:
         os.kill(pid, signal.SIGKILL)
     time.sleep(0.5)
     PID_FILE.unlink(missing_ok=True)
+    STATE_FILE.unlink(missing_ok=True)
     return 0
 
 
@@ -434,6 +594,10 @@ def main(argv: list[str] | None = None) -> int:
     p_start = sub.add_parser("start", help="后台启动并等待就绪（pip 安装后用这个）")
     _add_run_args(p_start, "0.0.0.0")
     p_start.set_defaults(func=_start)
+
+    p_status = sub.add_parser("status", help="看当前实例的运行信息")
+    p_status.add_argument("--json", action="store_true", help="输出 JSON，给脚本用")
+    p_status.set_defaults(func=_status)
 
     p_stop = sub.add_parser("stop", help="停止后台实例")
     p_stop.add_argument(

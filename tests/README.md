@@ -7,6 +7,7 @@ fixture 来源）和 `test.py`。相关的用例合并在一个场景下，跟�
 
 | 目录 | 测什么 |
 |---|---|
+| [`cli_status/`](cli_status/) | `shellbase status`：运行信息从 `instance.json` 来，但文件会说谎——进程死了要认出来并清理陈旧文件、落盘的令牌要验过才敢显示、`--json` 的 `token` 验不出就是 `null` |
 | [`tty_proxy/`](tty_proxy/) | `/tty/` 反向代理这条链路：无体的请求不许被塞进体（否则 httpx 补 `Transfer-Encoding: chunked`，ttyd 发完响应头就断，终端块白页）、并发下同样成立、有体的请求照常带体、query 与头透传、上游不可达 502、门禁盖住反代通道 |
 
 ## 共享 fixture / helper（`conftest.py`）

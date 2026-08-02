@@ -60,10 +60,28 @@ shellbase 已启动（pid 12345）
 令牌不设 `SHELLBASE_TOKEN` 时随机生成并存在 `~/.shellbase/token`（0600）复用——
 否则 stop/start 一次，浏览器里存的地址就全废了。想轮换删掉这个文件即可。
 
+忘了地址或令牌就 `shellbase status`：
+
+```
+shellbase 运行中（pid 19763）
+  地址     http://127.0.0.1:8080
+  令牌     3d9e8dab2a1c0b9b76d5dd8f8d7eacb6
+  工作区   /root/workspace
+  终端     ttyd 127.0.0.1:41234
+  已运行   1小时2分
+  健康     ok
+  日志     /root/.shellbase/shellbase.log
+  停止     shellbase stop
+```
+
+没在跑时退出码非 0，方便脚本判断；`shellbase status --json` 给机器读
+（`token` 字段验不出实例认哪份令牌时是 `null`）。
+
 命令一览：
 
 ```bash
 shellbase start     # 后台启动并等待就绪（关掉 ssh 也不会被带走）
+shellbase status    # 看当前实例：地址、令牌、工作区、终端端口、运行时长、健康
 shellbase stop      # 停止后台实例（先 SIGTERM，超时才 SIGKILL）
 shellbase daemon    # 前台阻塞运行，日志走 stdout —— 容器与 systemd 用这个
 shellbase serve     # 只起 HTTP 服务，不拉 ttyd（自己编排进程时用）

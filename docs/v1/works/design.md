@@ -228,7 +228,13 @@ ttyd 的端口默认由内核挑一个空闲回环端口（`--ttyd-port` 可指�
 | 命令 | 形态 | 谁用 |
 |------|------|------|
 | `shellbase daemon` | 前台阻塞，日志走 stdout | 容器 ENTRYPOINT；systemd 的 `ExecStart` |
-| `shellbase start` / `stop` | 后台守护，PID 与日志落在 run 目录（默认 `~/.shellbase/`） | pip 装完、手边没有进程管理器的用户 |
+| `shellbase start` / `stop` / `status` | 后台守护，PID、日志与运行信息落在 run 目录（默认 `~/.shellbase/`） | pip 装完、手边没有进程管理器的用户 |
+
+`daemon` 起服务前把运行信息（pid / 监听地址 / ttyd 端口 / 工作区 / 启动时刻）写进
+`instance.json`，`status` 读的就是这份——因此前台跑的实例同样看得到。文件会说谎
+（进程可能已经没了、令牌可能被 `SHELLBASE_TOKEN` 盖过），所以 `status` 一律回头
+验证：pid 还在不在、`/api/system/health` 应不应答、落盘的令牌拿去
+`/api/auth/verify` 认不认。
 
 `start` 只是用 `start_new_session` 把 `daemon` 脱离终端拉起来，再轮询健康检查等它
 就绪——起不来就把日志尾巴摆到眼前，而不是丢个 pid 让人自己去找。后台实例的令牌
