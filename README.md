@@ -17,7 +17,7 @@
 | 系统依赖 | 镜像自带 | 自己装 tmux + ttyd |
 | Agent CLI（claude、codex） | 镜像预装 | 自己 `npm i -g` |
 | 隔离 | 容器 | 无，直接跑在宿主机上 |
-| 启动 | `docker run` | `shellbase up` |
+| 启动 | `docker run` | `shellbase start` |
 
 两条路径都不需要 nginx，也没有任何配置文件要写。
 
@@ -44,29 +44,44 @@ npm install -g @anthropic-ai/claude-code @openai/codex   # 可选：claude:// �
 
 # 2) 装并启动
 pip install shellbase
-SHELLBASE_TOKEN=your-secret shellbase up --workspace ~/workspace
+shellbase start --workspace ~/workspace
 ```
 
-同样浏览器开 `http://<host>:8080` 输入令牌。不设 `SHELLBASE_TOKEN` 就会在终端打印随机令牌，
-`--workspace` 不给则用当前目录。
+`start` 会在后台拉起服务并等它就绪，然后把地址、令牌、日志路径打出来：
 
-`shellbase up` 会拉起 ttyd 子进程并把它的存活与自身绑定（ttyd 挂了就整体退出，不留半死实例），
-退出时回收子进程。要交给 systemd 托管的话，一条 `ExecStart=shellbase up` 就够。
+```
+shellbase 已启动（pid 12345）
+  地址   http://127.0.0.1:8080
+  令牌   3f2a…
+  日志   ~/.shellbase/shellbase.log
+  停止   shellbase stop
+```
 
-pip 路径下 tmux 走独立 socket（`-L shellbase`）与随包配置，不与你自己的 tmux server 混在一起。
+令牌不设 `SHELLBASE_TOKEN` 时随机生成并存在 `~/.shellbase/token`（0600）复用——
+否则 stop/start 一次，浏览器里存的地址就全废了。想轮换删掉这个文件即可。
 
-命令：
+命令一览：
 
 ```bash
-shellbase up        # 完整服务（ttyd + HTTP 网关），默认 0.0.0.0:8080
+shellbase start     # 后台启动并等待就绪（关掉 ssh 也不会被带走）
+shellbase stop      # 停止后台实例（先 SIGTERM，超时才 SIGKILL）
+shellbase daemon    # 前台阻塞运行，日志走 stdout —— 容器与 systemd 用这个
 shellbase serve     # 只起 HTTP 服务，不拉 ttyd（自己编排进程时用）
 shellbase paths     # 打印随包分发的前端产物 / tmux.conf / attach.sh 路径
 ```
 
+交给 systemd 托管就用前台那个：`ExecStart=shellbase daemon --workspace /srv/work`。
+
+`daemon` 会拉起 ttyd 子进程并把它的存活与自身绑定：ttyd 挂了整体退出，不留半死实例；
+反过来主进程无论怎么死（含 SIGKILL），内核都会顺手带走 ttyd。ttyd 只监听回环，
+端口默认自动挑一个空闲的（`--ttyd-port` 可固定），不会跟你自己跑的 ttyd 打架。
+
+pip 路径下 tmux 走独立 socket（`-L shellbase`）与随包配置，不与你自己的 tmux server 混在一起。
+
 常用环境变量：`SHELLBASE_TOKEN`、`SHELLBASE_PORT`、`SHELLBASE_WORKSPACE`、`SHELLBASE_STATE_DIR`，
 完整一览见 [design.md §4.3](docs/v1/works/design.md)。
 
-> 安全提醒：`up` 默认监听 `0.0.0.0`，拿到令牌等于拿到这台机器上跑 shell 的能力。
+> 安全提醒：默认监听 `0.0.0.0`，拿到令牌等于拿到这台机器上跑 shell 的能力。
 > 公网部署请在外层套 TLS，或用 `--host 127.0.0.1` 配合 SSH 隧道。
 
 ## 本地开发
@@ -76,7 +91,7 @@ shellbase paths     # 打印随包分发的前端产物 / tmux.conf / attach.sh 
 python3 -m venv .venv && .venv/bin/pip install -r server/requirements.txt
 PYTHONPATH=$PWD/server SHELLBASE_TOKEN=dev SHELLBASE_ATTACH_SH=$PWD/bin/attach.sh \
 SHELLBASE_WEB_ROOT=$PWD/web/dist \
-  .venv/bin/python -m shellbase.cli up --host 127.0.0.1 --port 8000 --workspace $PWD/workspace
+  .venv/bin/python -m shellbase.cli daemon --host 127.0.0.1 --port 8000 --workspace $PWD/workspace
 
 # 前端（Vite dev server，把 /api、/tty、/proxy 都代理给后端）
 cd web && npm install && npm run dev

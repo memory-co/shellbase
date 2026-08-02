@@ -65,4 +65,4 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
     CMD curl -sf "http://127.0.0.1:${SHELLBASE_PORT:-${PORT:-8080}}/api/system/health" || exit 1
 
-ENTRYPOINT ["/usr/bin/tini", "--", "/opt/shellbase/venv/bin/python", "-m", "shellbase.cli", "up"]
+ENTRYPOINT ["/usr/bin/tini", "--", "/opt/shellbase/venv/bin/python", "-m", "shellbase.cli", "daemon"]

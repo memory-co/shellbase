@@ -211,19 +211,33 @@ Agent 与文件/浏览器的融合点：Agent 在终端里跑，工作目录就�
 网关下沉进 FastAPI 后，容器里只剩两个进程，父子关系明确，不再需要 supervisord：
 
 ```
-tini                    # 容器里的 PID 1：转发信号、回收孤儿进程
-└── shellbase up        # cli.py：备好环境与状态目录、生成/打印 token
-    │                   #   进程本身就是 uvicorn（API + 网关同进程，对外端口）
-    └── ttyd            # 127.0.0.1:7681，-W -a bin/attach.sh
+tini                     # 容器里的 PID 1：转发信号、回收孤儿进程
+└── shellbase daemon     # cli.py：备好环境与状态目录、生成/打印 token
+    │                    #   进程本身就是 uvicorn（API + 网关同进程，对外端口）
+    └── ttyd             # 127.0.0.1:<自动挑的空闲端口>，-W -a bin/attach.sh
 ```
 
-`up` 负责：生成/打印 token、创建状态目录、拉起 ttyd、把 ttyd 的存活与自身绑定
+ttyd 的端口默认由内核挑一个空闲回环端口（`--ttyd-port` 可指定）：它只服务本机的网关，
+端口号对外没有意义，写死反而会跟用户自己跑的 ttyd 撞车。
+
+`daemon` 负责：生成/打印 token、创建状态目录、拉起 ttyd、把 ttyd 的存活与自身绑定
 （ttyd 异常退出即整体收摊，避免留下"终端全挂但页面还在"的半死实例）。
+
+同一件事有两种跑法，区别只在谁来守着这个进程：
+
+| 命令 | 形态 | 谁用 |
+|------|------|------|
+| `shellbase daemon` | 前台阻塞，日志走 stdout | 容器 ENTRYPOINT；systemd 的 `ExecStart` |
+| `shellbase start` / `stop` | 后台守护，PID 与日志落在 run 目录（默认 `~/.shellbase/`） | pip 装完、手边没有进程管理器的用户 |
+
+`start` 只是用 `start_new_session` 把 `daemon` 脱离终端拉起来，再轮询健康检查等它
+就绪——起不来就把日志尾巴摆到眼前，而不是丢个 pid 让人自己去找。后台实例的令牌
+落在 `~/.shellbase/token`（0600）复用：否则 stop/start 一次，浏览器里存的地址全废。
 
 反向的绑定用 `PR_SET_PDEATHSIG` 交给内核：父进程一消失，ttyd 立刻收到 SIGTERM。
 不能只写在 `finally` 里——uvicorn 处理完 SIGTERM 会把信号重新抛给原处理器，
 进程直接死于信号，`finally` 根本不执行（SIGKILL 更是如此）。
-Docker 的 `ENTRYPOINT` 就是它，pip 安装后用户敲的也是它——两条路径同一份启动逻辑。
+两条路径跑的是同一份启动逻辑，只是外面包的壳不同。
 
 ### 4.2 基础镜像（多阶段构建）
 

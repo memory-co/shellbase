@@ -213,9 +213,17 @@ async def proxy_http(request: Request, upstream: str, path: str) -> Response:
         (k, v) for k, v in request.headers.raw
         if k.decode("latin-1").lower() not in HOP_BY_HOP
     ]
+    # 只有原请求确实带体才转发体：给 GET 挂一个流式 body 会让 httpx 加上
+    # Transfer-Encoding: chunked，上游（libwebsockets）会在发完响应头后直接断开
+    has_body = (
+        "content-length" in request.headers or "transfer-encoding" in request.headers
+    )
     client = _http_client()
     req = client.build_request(
-        request.method, url, headers=headers, content=request.stream()
+        request.method,
+        url,
+        headers=headers,
+        content=request.stream() if has_body else None,
     )
     try:
         upstream_resp = await client.send(req, stream=True)
