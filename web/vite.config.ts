@@ -18,9 +18,11 @@ export default defineConfig({
     },
   },
   server: {
+    // 全部转给后端：网关（静态之外的一切）现在也在同一个进程里
     proxy: {
-      "/api": "http://127.0.0.1:8000",
-      "/tty": { target: "http://127.0.0.1:7681", ws: true },
+      "/api": { target: "http://127.0.0.1:8000", ws: true },
+      "/tty": { target: "http://127.0.0.1:8000", ws: true },
+      "/proxy": { target: "http://127.0.0.1:8000", ws: true },
     },
   },
 });

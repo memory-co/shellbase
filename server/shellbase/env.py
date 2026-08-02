@@ -9,7 +9,15 @@ import subprocess
 
 from fastapi import APIRouter
 
-from .state import STATE_DIR, ApiError, lock, now_iso, read_json, write_json_atomic
+from .state import (
+    STATE_DIR,
+    ApiError,
+    lock,
+    now_iso,
+    read_json,
+    tmux_argv,
+    write_json_atomic,
+)
 
 router = APIRouter(prefix="/api/env")
 
@@ -32,12 +40,12 @@ def _sync_tmux(vars_: dict[str, str], removed: list[str]) -> None:
     """tmux 全局环境：新会话从中继承（env.md §2）。tmux server 未起时忽略。"""
     for key, value in vars_.items():
         subprocess.run(
-            ["tmux", "set-environment", "-g", key, value],
+            tmux_argv("set-environment", "-g", key, value),
             capture_output=True, timeout=5,
         )
     for key in removed:
         subprocess.run(
-            ["tmux", "set-environment", "-gr", key],
+            tmux_argv("set-environment", "-gr", key),
             capture_output=True, timeout=5,
         )
 

@@ -21,8 +21,8 @@ shellbase = **在任意 VM 上一条 `docker run` 拉起的 Web 工作台**，�
 | 文件 | 无或只有简陋上传 | 完整文件管理器 + 在线编辑器 |
 | 浏览器 | 无 | 内嵌浏览器面板（iframe），与终端/文件同屏 |
 | Agent | 无 | 一等公民：会话管理、同屏观察、随时接管 |
-| 部署 | 依赖宿主 web 服务 | 单容器自包含，nginx 统一入口 |
-| 认证 | 通常裸奔 | token 认证，nginx 层统一鉴权 |
+| 部署 | 依赖宿主 web 服务 | 单容器自包含（或一条 pip 安装），单端口统一入口 |
+| 认证 | 通常裸奔 | token 认证，网关层统一鉴权 |
 | 协作 | 无 | 多客户端同开一个页面/终端，实时镜像（见 [collab.md](collab.md)） |
 
 ### 1.3 v1 范围（明确不做的事）
@@ -40,61 +40,73 @@ shellbase = **在任意 VM 上一条 `docker run` 拉起的 Web 工作台**，�
 ```
                         ┌─────────────────────────── Docker 容器 ───────────────────────────┐
                         │                                                                    │
-  浏览器(用户)           │   ┌─────────┐                                                      │
- ───────────────────────┼──▶│  nginx  │  :8080  统一入口 / 静态资源 / 反代 / 鉴权             │
-   HTTP + WebSocket     │   └────┬────┘                                                      │
-                        │        │                                                           │
-                        │        ├── /            → 前端静态文件：分割布局 Shell + 各应用页面（iframe 装载）
-                        │        │                                                           │
-                        │        ├── /api/…       → FastAPI   127.0.0.1:8000                 │
-                        │        │                  ├─ 文件管理 API                           │
-                        │        │                  ├─ 终端/Agent 会话 + 布局状态              │
-                        │        │                  └─ auth_request 鉴权端点                  │
-                        │        │                                                           │
-                        │        └── /tty/…       → ttyd      127.0.0.1:7681  (WebSocket)   │
-                        │                            └─ 挂到 tmux 会话上，提供持久终端        │
+  浏览器(用户)           │   ┌──────────────────┐                                             │
+ ───────────────────────┼──▶│ uvicorn(FastAPI) │ :8080  唯一对外端口                        │
+   HTTP + WebSocket     │   └────────┬─────────┘                                             │
+                        │            │  gateway.py：鉴权门禁 / 静态托管 / 反向代理            │
+                        │            │                                                       │
+                        │            ├── /            → 前端静态产物：Shell + 各应用页面      │
+                        │            │                                                       │
+                        │            ├── /api/…       → 同进程内的 API 路由                   │
+                        │            │                  ├─ 文件管理 API                       │
+                        │            │                  ├─ 终端/Agent 会话 + 布局状态          │
+                        │            │                  └─ 登录/登出/探测端点                 │
+                        │            │                                                       │
+                        │            ├── /tty/…       → 反代 ttyd  127.0.0.1:7681 (HTTP+WS)  │
+                        │            │                  └─ 挂到 tmux 会话上，提供持久终端      │
+                        │            │                                                       │
+                        │            └── /proxy/<port>/… → 反代 127.0.0.1:<port>（本机服务）  │
                         │                                                                    │
                         │   浏览器面板：前端 iframe 直接加载目标 URL，不经容器内进程            │
-                        │   supervisord 负责拉起并守护：nginx / ttyd / fastapi                │
+                        │   进程只有两个：uvicorn 与它拉起的 ttyd（`shellbase up`）            │
                         │   /workspace  ← 挂载卷，终端、文件、Agent 共享同一工作目录           │
                         └────────────────────────────────────────────────────────────────────┘
 ```
 
 核心原则：
 
-1. **nginx 是唯一对外端口**（默认 `:8080`），其余进程全部只监听 `127.0.0.1`；
+1. **网关进程是唯一对外端口**（默认 `:8080`），ttyd 与用户起的本机服务只监听 `127.0.0.1`，一律经网关反代；
 2. **所有子系统共享 `/workspace`**：终端里 Agent 改的文件，文件面板立刻能看到；文件面板上传的资料，终端里立刻能用；
 3. **ttyd 不直接暴露 shell，而是挂到 tmux**：会话持久化、断线重连、多标签都由 tmux 承担；
 4. **浏览器面板是纯前端能力**：iframe 直接加载目标页面，容器内不跑任何浏览器进程，镜像保持精简；典型用途是查看容器内启动的 web 服务（dev server、文档站等）和允许被嵌入的外部页面。
 
 ## 3. 组件设计
 
-### 3.1 nginx（顶层 HTTP 负载）
+### 3.1 应用层网关（`gateway.py`）
 
-职责：静态资源、路由、WebSocket 升级、统一鉴权、限流。
+职责：鉴权门禁、静态托管、WebSocket 与 HTTP 反向代理、登录限流。它是 FastAPI 应用的一部分，
+不是独立进程——因此 Docker 与 pip 两条分发路径都只需一个端口、一个进程树，且没有任何配置文件。
+
+> v1 早期这一层是 nginx（`auth_request` + `proxy_pass`）。改为应用层网关的理由：pip 安装
+> 场景下要求用户自行安装并配置 nginx，是这条路径上最大的一块摩擦；而 nginx 在这里承担的
+> 全部职责都能在 ASGI 层等价实现。
 
 路由表：
 
 | 路径 | 目标 | 说明 |
 |------|------|------|
-| `/` | `/opt/shellbase/web`（静态） | 前端 SPA |
-| `/api/` | `http://127.0.0.1:8000` | FastAPI |
-| `/tty/` | `http://127.0.0.1:7681` | ttyd，需 WS 升级 |
+| `/api/` | 同进程路由 | FastAPI 各模块 |
+| `/tty/` | `http://127.0.0.1:7681` | ttyd，HTTP 与 WS 都经反代（子协议 `tty` 原样协商） |
+| `/proxy/<port>/` | `http://127.0.0.1:<port>` | 本机服务通配代理（uri.md §3） |
+| 其余 | 静态产物 | 命中文件 → 同名 `.html`（`/apps/files` → `apps/files.html`）→ SPA 兜底 `index.html` |
 
 鉴权方案（v1）：
 
-- 启动时通过环境变量 `SHELLBASE_TOKEN` 注入访问令牌（不设置则启动时随机生成并打印到容器日志）；
-- 前端登录页把 token 写入 Cookie（`HttpOnly` 由 FastAPI 下发）；
-- nginx 对 `/tty/`、`/api/` 一律走 `auth_request /api/auth/verify`，由 FastAPI 校验 Cookie/Header 中的 token；
-- 静态资源、`/api/auth/login`、`/api/system/health`（Docker 健康检查）放行。
+- 启动时通过环境变量 `SHELLBASE_TOKEN` 注入访问令牌（不设置则启动时随机生成并打印到日志）；
+- 前端登录页把 token 交给 `/api/auth/login`，由 FastAPI 下发 `HttpOnly` Cookie；
+- `AuthGate` 是包在整个 ASGI 应用**最外层**的中间件，HTTP 与 WebSocket 一视同仁：
+  没有有效令牌，任何请求都到不了下游路由（WS 在 accept 之前就被关闭，握手不会建立）；
+- 放行名单只有三项：`/login`、`POST /api/auth/login`、`GET /api/system/health`。
+  新增路由默认受保护——这个默认方向是有意的。
 
-这样 ttyd 自身不需要感知认证，鉴权收敛在一处（端点与 Cookie 细节见 [api/auth.md](../api/auth.md)）。
+ttyd 自身仍不感知认证，鉴权收敛在一处（端点与 Cookie 细节见 [api/auth.md](../api/auth.md)）。
 
-关键配置点：
+关键实现点：
 
-- `proxy_read_timeout` 对 WS 路由调大（如 24h），避免终端空闲被掐断；
-- `client_max_body_size` 调大（如 1G）以支持文件上传；
-- 对 `/tty/` 设置 `proxy_http_version 1.1` + `Upgrade/Connection` 头。
+- 反代的读超时放到 24h，避免空闲终端被掐断；
+- WebSocket 反代必须**先连上游、拿到协商结果，再 accept 客户端**，否则子协议对不上；
+- 登录限流用令牌桶（容量 6、每 6 秒回补 1 个），等价于原先 nginx 的 `rate=10r/m burst=5 nodelay`，超限返回 `429`；
+- 上传按 `Content-Length` 卡 1GB 上限，超限 `413`。
 
 ### 3.2 ttyd + tmux（终端子系统）
 
@@ -108,12 +120,14 @@ shellbase = **在任意 VM 上一条 `docker run` 拉起的 Web 工作台**，�
 
 ### 3.3 FastAPI（接口服务）
 
-单进程 uvicorn，监听 `127.0.0.1:8000`。模块划分：
+单进程 uvicorn，直接监听对外端口（默认 `:8080`）。模块划分：
 
 ```
 app/
 ├── main.py              # FastAPI 实例、路由挂载、启动钩子
-├── auth.py              # /api/auth/{login,verify,logout,me}（verify 供 nginx auth_request）
+├── auth.py              # /api/auth/{login,verify,logout,me}
+├── gateway.py           # 鉴权门禁 + 静态托管 + 反向代理（§3.1）
+├── cli.py               # shellbase up / serve / paths
 ├── files.py             # 文件管理
 ├── terminals.py         # 终端会话注册表 + 302 attach + Agent 会话（见 backend.md）
 ├── windows.py           # window（页面）状态的读写 + watch 广播（见 backend.md / collab.md）
@@ -142,7 +156,7 @@ app/
 
 主要用途与已知限制：
 
-- **主用途是查看容器内起的 web 服务**：Agent 在终端里 `npm run dev` 起了 dev server，用户在浏览器面板输入 `http://<host>:<port>` 直接预览。目标端口无需对外映射——`https://localhost:<port>` 类 URI 经 nginx 通配代理路由（`/proxy/<port>/` → `127.0.0.1:<port>`）访问，同源且无嵌入限制（见 [uri.md](uri.md)）；
+- **主用途是查看容器内起的 web 服务**：Agent 在终端里 `npm run dev` 起了 dev server，用户在浏览器面板输入 `http://<host>:<port>` 直接预览。目标端口无需对外映射——`https://localhost:<port>` 类 URI 经网关通配代理路由（`/proxy/<port>/` → `127.0.0.1:<port>`）访问，同源且无嵌入限制（见 [uri.md](uri.md)）；
 - **外部站点受同源策略约束**：设置了 `X-Frame-Options` / `frame-ancestors` 的站点（大多数登录类站点）无法被 iframe 嵌入，此为方案的已知取舍——遇到时前端提示"在新窗口打开"。
 
 ### 3.5 CLI Agent 子系统
@@ -192,21 +206,28 @@ Agent 与文件/浏览器的融合点：Agent 在终端里跑，工作目录就�
 
 ## 4. 进程模型与 Dockerfile
 
-### 4.1 进程守护
+### 4.1 进程模型
 
-容器内多进程，用 **supervisord** 守护（成熟、日志方便）：
+网关下沉进 FastAPI 后，容器里只剩两个进程，父子关系明确，不再需要 supervisord：
 
-```ini
-[program:nginx]      command=nginx -g 'daemon off;'            priority=30
-[program:fastapi]    command=uvicorn shellbase.main:app --host 127.0.0.1 --port 8000   priority=20
-[program:ttyd]       command=ttyd -i 127.0.0.1 -p 7681 -W /opt/shellbase/bin/attach.sh  priority=20
+```
+tini                    # 容器里的 PID 1：转发信号、回收孤儿进程
+└── shellbase up        # cli.py：备好环境与状态目录、生成/打印 token
+    │                   #   进程本身就是 uvicorn（API + 网关同进程，对外端口）
+    └── ttyd            # 127.0.0.1:7681，-W -a bin/attach.sh
 ```
 
-启动顺序：supervisord → fastapi/ttyd → nginx。entrypoint 脚本负责：生成/打印 token、初始化 `/workspace` 权限、渲染 nginx 配置模板（端口等来自环境变量）。
+`up` 负责：生成/打印 token、创建状态目录、拉起 ttyd、把 ttyd 的存活与自身绑定
+（ttyd 异常退出即整体收摊，避免留下"终端全挂但页面还在"的半死实例）。
+
+反向的绑定用 `PR_SET_PDEATHSIG` 交给内核：父进程一消失，ttyd 立刻收到 SIGTERM。
+不能只写在 `finally` 里——uvicorn 处理完 SIGTERM 会把信号重新抛给原处理器，
+进程直接死于信号，`finally` 根本不执行（SIGKILL 更是如此）。
+Docker 的 `ENTRYPOINT` 就是它，pip 安装后用户敲的也是它——两条路径同一份启动逻辑。
 
 ### 4.2 基础镜像（多阶段构建）
 
-两阶段：node 阶段编译前端（只有静态产物进运行时），运行时基于 **ubuntu 24.04**（ttyd 可直接 apt）。镜像同时是平台运行时和用户的终端环境——装什么、为什么装、刻意不装什么、非 root 下的扩展路径，专项设计见 [image.md](image.md)。镜像内以非 root 用户 `shellbase`（UID 1000）运行所有进程（nginx 用非特权端口，故无需 root）。
+两阶段：node 阶段编译前端（只有静态产物进运行时），运行时基于 **ubuntu 24.04**（ttyd 可直接 apt）。镜像同时是平台运行时和用户的终端环境——装什么、为什么装、刻意不装什么、非 root 下的扩展路径，专项设计见 [image.md](image.md)。镜像内以非 root 用户 `shellbase`（UID 1000）运行所有进程（对外端口是非特权端口，故无需 root）。
 
 ### 4.3 启动方式
 
@@ -223,17 +244,20 @@ docker run -d --name shellbase \
 | 变量 | 默认 | 说明 |
 |------|------|------|
 | `SHELLBASE_TOKEN` | 随机生成 | 访问令牌 |
-| `SHELLBASE_PORT` | `8080` | nginx 监听端口 |
+| `SHELLBASE_PORT` | `8080` | 对外监听端口 |
 | `SHELLBASE_WORKSPACE` | `/workspace` | 工作根目录 |
 | `SHELLBASE_STATE_DIR` | `/workspace/.shellbase/state` | 后端状态存储目录（见 backend.md） |
+| `SHELLBASE_TMUX_SOCKET` | 空（pip 路径为 `shellbase`） | tmux socket 名，与用户自己的 tmux server 隔离 |
+| `SHELLBASE_TMUX_CONF` | 空（pip 路径为随包 tmux.conf） | tmux 配置文件 |
+| `SHELLBASE_WEB_ROOT` | 随包静态产物 | 前端产物目录 |
 | `SHELLBASE_APPS_EXTRA` | 空 | JSON，应用注册表扩展：命令别名/固定参数、宫格冷启动兜底与元数据、`url` 型应用（见 uri.md §6） |
 
 ## 5. 安全设计
 
 shellbase 本质上是"授权的远程 shell"，安全边界必须清晰：
 
-1. **单一入口**：只有 nginx 端口对外；ttyd、FastAPI 全部绑定 loopback；
-2. **强制 token**：nginx `auth_request` 覆盖所有动态路由，未认证只能看到登录页；token 比较用常量时间比较；登录接口 nginx 层限速（同 IP 60s 内 10 次，见 api/auth.md）；
+1. **单一入口**：只有网关端口对外；ttyd 及用户起的本机服务绑定 loopback，只能经网关反代抵达；
+2. **强制 token**：`AuthGate` 包在 ASGI 应用最外层，覆盖所有路由（含静态页与 WebSocket），未认证只能看到登录页；token 比较用常量时间比较；登录接口限速（同 IP 60s 内 10 次，见 api/auth.md）；
 3. **传输加密**：文档明确告知——公网部署必须在外层套 TLS（云 LB / caddy / 反代），或 `-v` 挂证书启用容器内 HTTPS（v1.1 再做）；
 4. **文件 API 越权防护**：所有路径 `resolve()` 后必须以 workspace 根为前缀，否则 403；符号链接解析后同样受此约束；
 5. **能力自觉**：终端本身就是全量 shell，因此文件 API 不需要也不假装做比 shell 更细的权限控制——安全模型是"拿到 token 即拥有容器"，边界靠容器隔离（建议部署时不加 `--privileged`，按需挂载目录）；
@@ -244,12 +268,11 @@ shellbase 本质上是"授权的远程 shell"，安全边界必须清晰：
 ```
 shellbase/
 ├── Dockerfile
+├── pyproject.toml          # pip 包：后端 + 前端产物 + deploy 资源
 ├── deploy/
-│   ├── nginx.conf.tmpl
-│   ├── supervisord.conf
-│   └── entrypoint.sh
+│   └── tmux.conf
 ├── server/                 # FastAPI
-│   └── app/…
+│   └── shellbase/…
 ├── web/                    # 前端 SPA
 │   └── src/…
 ├── bin/
@@ -271,7 +294,7 @@ shellbase/
 
 | 阶段 | 内容 | 验收标准 |
 |------|------|----------|
-| M1 骨架 | Dockerfile + supervisord + nginx + ttyd(tmux) + FastAPI 健康检查 + token 鉴权 + 分割布局 Shell（终端应用可装块） | 一条 docker run 后登录，任意分割布局并在多个块中使用持久终端 |
+| M1 骨架 | Dockerfile + ttyd(tmux) + FastAPI（网关 + 健康检查 + token 鉴权）+ 分割布局 Shell（终端应用可装块） | 一条 docker run 后登录，任意分割布局并在多个块中使用持久终端 |
 | M2 文件 | 文件 API 全套 + 文件浏览器应用（树/编辑器/上传下载） | 终端改文件 ⇄ 文件块实时可见、可编辑 |
 | M3 浏览器 | 浏览器应用（地址栏/历史/URL 恢复）+ 布局持久化 | 终端块起 dev server，旁边浏览器块预览；刷新页面布局原样恢复 |
 | M4 Agent | Agent 会话（URI attach）+ Claude Code / Codex 应用接入 URL bar | 空白块的 URL bar 选择 Claude Code 即启动会话，块内直接对话、随时接管 |
@@ -281,6 +304,6 @@ shellbase/
 
 1. **ttyd + tmux 而非自研 pty 服务**：ttyd 成熟稳定、WS 协议简单；tmux 免费获得持久化与多会话。代价是多一层依赖，可接受。
 2. **浏览器面板用纯前端 iframe，而非容器内 Chromium（CDP/noVNC）**：容器不跑浏览器进程，镜像小、实现简单、零额外资源开销。代价是设置了 `X-Frame-Options`/`frame-ancestors` 的外部站点无法嵌入——v1 的主场景是预览容器内 web 服务，可接受；若后续需要 Agent 驱动的真实浏览器，再引入 headless Chromium 作为 v2 能力。
-3. **supervisord 而非 s6/多容器 compose**："单 Dockerfile 拉起"是硬需求，排除 compose；supervisord 配置直观、python 生态一致。
-4. **鉴权收敛到 nginx auth_request**：ttyd/静态资源无需各自实现认证，未来换认证方式只改一处。
+3. **进程编排放在 `shellbase up` 里，而非 supervisord/compose**："单 Dockerfile 拉起"是硬需求，排除 compose；网关下沉后只剩 uvicorn + ttyd 两个进程，一段 Python 足够，还顺带让 pip 路径与 Docker 路径共用同一份启动逻辑。
+4. **鉴权收敛到 ASGI 最外层的 `AuthGate`，而非 nginx `auth_request`**：ttyd/静态资源无需各自实现认证，未来换认证方式只改一处；相比 nginx 方案还少了一整套需要用户安装与配置的外部依赖，代价是限流、静态托管、反代这些能力要自己实现（见 §3.1）。
 5. **前端采用"分割布局 Shell + iframe 应用"而非单体 SPA**：组合能力放在布局层（任意分割、每块自选应用），应用本身只是 URI——终端直接复用 ttyd 自带页面，零终端渲染代码；应用彼此隔离、可独立开发、可通过配置扩展（新增一个 Agent 只是注册一条命令模板）。代价是跨块联动（如文件树点击在编辑器块打开）需要经 Shell 层 postMessage 中转，v1 仅实现最小联动。

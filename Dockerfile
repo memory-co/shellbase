@@ -13,11 +13,14 @@ FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# ttyd 在 ubuntu 24.04 (noble) universe 仓库里，直接装；其余基础组件同装
+# ttyd 在 ubuntu 24.04 (noble) universe 仓库里，直接装；其余基础组件同装。
+# 网关（静态托管 / 鉴权 / 反代）在 FastAPI 里，因此不需要 nginx，
+# 进程只有 uvicorn + ttyd 两个，也就不需要 supervisor；
+# tini 只做 PID 1 的本分：转发信号、回收孤儿进程（原本是 supervisord 的活）。
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        nginx tmux ttyd supervisor \
+        tmux ttyd tini \
         python3 python3-venv \
-        gettext-base curl ca-certificates git \
+        curl ca-certificates git \
     && rm -rf /var/lib/apt/lists/* \
     && ttyd --version
 
@@ -39,19 +42,21 @@ RUN python3 -m venv /opt/shellbase/venv \
         -r /opt/shellbase/server/requirements.txt
 
 COPY server/ /opt/shellbase/server/
-COPY deploy/ /opt/shellbase/deploy/
 COPY bin/ /opt/shellbase/bin/
 COPY --from=web /src/dist /opt/shellbase/web
 COPY deploy/tmux.conf /etc/tmux.conf
 
-RUN mkdir -p /opt/shellbase/run /workspace \
-    && chmod +x /opt/shellbase/bin/attach.sh /opt/shellbase/deploy/entrypoint.sh \
-                /opt/shellbase/deploy/start-nginx.sh \
+RUN mkdir -p /workspace \
+    && chmod +x /opt/shellbase/bin/attach.sh \
     && chown -R shellbase:shellbase /opt/shellbase /workspace
 
 USER shellbase
 ENV SHELLBASE_WORKSPACE=/workspace \
-    SHELLBASE_PORT=8080
+    SHELLBASE_PORT=8080 \
+    SHELLBASE_WEB_ROOT=/opt/shellbase/web \
+    SHELLBASE_ATTACH_SH=/opt/shellbase/bin/attach.sh \
+    PYTHONPATH=/opt/shellbase/server \
+    PYTHONUNBUFFERED=1
 
 VOLUME /workspace
 EXPOSE 8080
@@ -59,4 +64,4 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
     CMD curl -sf "http://127.0.0.1:${SHELLBASE_PORT}/api/system/health" || exit 1
 
-ENTRYPOINT ["/opt/shellbase/deploy/entrypoint.sh"]
+ENTRYPOINT ["/usr/bin/tini", "--", "/opt/shellbase/venv/bin/python", "-m", "shellbase.cli", "up"]

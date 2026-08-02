@@ -22,6 +22,7 @@ from .state import (
     now_iso,
     read_json,
     registry_by_scheme,
+    tmux_argv,
     write_json_atomic,
 )
 
@@ -136,7 +137,7 @@ def state_path(name: str) -> Path:
 
 def _tmux(*args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
-        ["tmux", *args], capture_output=True, text=True, timeout=10
+        tmux_argv(*args), capture_output=True, text=True, timeout=10
     )
 
 

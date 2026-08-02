@@ -20,7 +20,7 @@
 
 ## GET /api/system/health
 
-Docker `HEALTHCHECK` 与外部探活用。**nginx 对此端点放行**（不经 auth_request），不泄露任何信息：
+Docker `HEALTHCHECK` 与外部探活用。**网关对此端点放行**（无需令牌），不泄露任何信息：
 
 - `200 {"status":"ok"}`：FastAPI 存活且 state 目录可写；
 - 其余情况非 200。

@@ -6,7 +6,7 @@
 
 ## 1. 定位：镜像就是用户的 shell 环境
 
-shellbase 的镜像有双重身份：既是**平台的运行时**（nginx / ttyd / FastAPI），也是**用户直接面对的终端环境**——用户 attach 进来跑的每一条命令、Agent 干活用到的每一个工具，都来自这个镜像。因此选型原则不是"越小越好"，而是：
+shellbase 的镜像有双重身份：既是**平台的运行时**（FastAPI 网关 / ttyd / tmux），也是**用户直接面对的终端环境**——用户 attach 进来跑的每一条命令、Agent 干活用到的每一个工具，都来自这个镜像。因此选型原则不是"越小越好"，而是：
 
 - **平台层**求稳求薄：只装支撑四大子系统（终端/文件/浏览器/Agent）的最小集合；
 - **终端层**求开箱即用：`scheme 名即命令名`（uri.md §3.1）的前提是 PATH 里真的有命令——文档里举例的 `vim://`、`htop://` 不该是空头支票；
@@ -33,16 +33,14 @@ shellbase 的镜像有双重身份：既是**平台的运行时**（nginx / ttyd
 
 | 软件 | 来源 | 用途 |
 |------|------|------|
-| `nginx` | apt | 唯一对外入口：静态资源、反代、`auth_request` 鉴权、`/proxy/<port>/` 通配代理（design.md §3.1） |
 | `ttyd` | apt（noble universe） | 终端 WebSocket 服务，`-W attach.sh` 收口（design.md §3.2） |
 | `tmux` | apt | 会话持久化与多客户端镜像（collab.md）；配置进 `/etc/tmux.conf` |
-| `supervisor` | apt | 进程守护：nginx / ttyd / fastapi（design.md §4.1） |
-| `python3` + `python3-venv` | apt | FastAPI 后端，依赖装进 `/opt/shellbase/venv`（不污染系统 Python） |
-| `gettext-base` | apt | `envsubst` 渲染 `nginx.conf.tmpl`（端口等来自环境变量） |
+| `tini` | apt | PID 1 的本分：转发信号、回收孤儿进程（网关下沉后不再有 supervisord 干这活，design.md §4.1） |
+| `python3` + `python3-venv` | apt | FastAPI 后端（同时是唯一对外入口：静态资源、鉴权、`/tty/` 与 `/proxy/<port>/` 反代，design.md §3.1），依赖装进 `/opt/shellbase/venv`（不污染系统 Python） |
 | `curl` | apt | Docker `HEALTHCHECK` 探活 + 构建期安装脚本 |
 | `ca-certificates` | apt | 出网 HTTPS（Agent 调 API、git clone、pip/npm 下载的根证书） |
 
-Python 依赖（`server/requirements.txt`，pip 装进 venv）：`fastapi`、`uvicorn[standard]`（含 websockets——windows/files 的 watch 通道）、`watchfiles`（inotify 文件监听）、`python-multipart`（上传）。
+Python 依赖（`server/requirements.txt`，pip 装进 venv）：`fastapi`、`uvicorn[standard]`、`watchfiles`（inotify 文件监听）、`python-multipart`（上传）、`httpx` 与 `websockets`（网关反代 `/tty/`、`/proxy/<port>/`，同时也是 windows/files watch 通道所需）。
 
 ### 4.2 Agent 层（`claude://`、`codex://` 开箱即用）
 
@@ -68,11 +66,11 @@ Python 依赖（`server/requirements.txt`，pip 装进 venv）：`fastapi`、`uv
 
 ## 5. 用户、目录与运行约定
 
-- **非 root 运行**：删除 ubuntu 24.04 自带的 `ubuntu` 用户，建同 UID 的 `shellbase`；全部进程（含 nginx，非特权端口）以它运行，无 sudo。为什么删：
+- **非 root 运行**：删除 ubuntu 24.04 自带的 `ubuntu` 用户，建同 UID 的 `shellbase`；全部进程（对外端口是非特权端口）以它运行，无 sudo。为什么删：
   - ubuntu 23.04 起官方 OCI 镜像预置 `ubuntu` 用户占用 **UID 1000**，而 `useradd -u 1000` 遇占用会直接报错——要拿到这个 UID 必须先移走占位者（`userdel -r ubuntu || true`，`|| true` 兜底无此用户的基底）；
   - 坚持 UID 1000 是为了 **bind mount 属主对齐**：Linux 宿主机第一个普通用户几乎总是 1000，`-v $PWD/workspace:/workspace` 双向读写无 chown 麻烦（Docker Desktop 有映射层不受影响，Linux 服务器是主场景）；
   - 不复用/不改名 `ubuntu`：终端就是产品界面，提示符与 `$HOME` 该叫 shellbase；docker 版 `ubuntu` 是裸账号，改名保留不了任何东西，删除重建更直白；也不给 shellbase 换 UID 共存——1000 被休眠账号占着，挂载对齐就没了。删后镜像只有一个交互账号，"进程谁在跑、文件归谁"没有第二种答案；
-- 目录布局：`/opt/shellbase/{server,web,deploy,bin,venv,run}` 平台自用（属主 shellbase）；`/workspace` 为挂载卷（`VOLUME`），终端/文件/Agent 共享，state 也在其上（backend.md §3）；
+- 目录布局：`/opt/shellbase/{server,web,bin,venv}` 平台自用（属主 shellbase）；`/workspace` 为挂载卷（`VOLUME`），终端/文件/Agent 共享，state 也在其上（backend.md §3）；
 - `EXPOSE 8080`（`SHELLBASE_PORT` 可改）；`HEALTHCHECK` 打 `/api/system/health`。
 
 ## 6. 刻意不装的
@@ -81,7 +79,7 @@ Python 依赖（`server/requirements.txt`，pip 装进 venv）：`fastapi`、`uv
 |------|------|
 | headless 浏览器（Chromium/CDP） | v1 浏览器面板是纯前端 iframe（design.md §1.3），留给 v2 |
 | 数据库（SQLite/…） | 状态就是文件系统（backend.md §3），不引入 |
-| `sshd` | 唯一入口是 nginx:8080；再开 ssh 就是第二个鉴权面 |
+| `sshd` | 唯一入口是网关的 :8080；再开 ssh 就是第二个鉴权面 |
 | TLS 终结（certbot 等） | 公网 TLS 由外层反代/LB 解决（design.md §5） |
 | `build-essential` 等编译链 | 体积大、场景少；需要时走 §7 的加层路径 |
 

@@ -51,7 +51,7 @@
 | `PUT /api/env` | 增量合并：`{"vars": {"KEY": "value", "OLD_KEY": null}}`——字符串为设值，`null` 为删除；成功后同步 `tmux set-environment -g` |
 
 - 读接口不回传明文：value 一旦写入就只出不进（要改就整个重填），避免凭证在浏览器与日志中往返；
-- 鉴权与其他 API 一致（nginx auth_request），无额外权限层——单用户模型下"拿到 token 即拥有容器"（design.md §5"能力自觉"）；终端里本来就能 `env` 看到这些变量，此设计不引入新的暴露面。
+- 鉴权与其他 API 一致（网关 AuthGate），无额外权限层——单用户模型下"拿到 token 即拥有容器"（design.md §5"能力自觉"）；终端里本来就能 `env` 看到这些变量，此设计不引入新的暴露面。
 
 `GET /api/env` 响应示例：
 

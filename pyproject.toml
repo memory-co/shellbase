@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "shellbase"
-version = "0.1.0"
+version = "0.2.0"
 description = "融合终端平台：CLI Agent + 浏览器 + 文件管理，浏览器里的可分割画布"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -32,6 +32,8 @@ dependencies = [
     "uvicorn[standard]>=0.30",
     "watchfiles>=0.22",
     "python-multipart>=0.0.9",
+    "httpx>=0.27",          # 网关反代（/tty、/proxy/<port>）
+    "websockets>=14",       # 同上，websockets.asyncio.client 需要 14+
 ]
 
 [project.urls]
@@ -49,7 +51,6 @@ packages = ["server/shellbase"]
 # 构建前需先 `cd web && npm install && npm run build` 生成 web/dist。
 [tool.hatch.build.targets.wheel.force-include]
 "web/dist" = "shellbase/_assets/web"
-"deploy/nginx.conf.tmpl" = "shellbase/_assets/deploy/nginx.conf.tmpl"
 "deploy/tmux.conf" = "shellbase/_assets/deploy/tmux.conf"
 "bin/attach.sh" = "shellbase/_assets/bin/attach.sh"
 

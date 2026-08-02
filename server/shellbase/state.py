@@ -21,6 +21,19 @@ WINDOWS_DIR = STATE_DIR / "windows"
 lock = asyncio.Lock()
 
 
+def tmux_argv(*args: str) -> list[str]:
+    """tmux 命令行前缀：pip 安装时用独立 socket + 自带配置，避免与用户自己的
+    tmux server 互相污染（Docker 里两者都不设，用默认 socket 与 /etc/tmux.conf）。"""
+    argv = ["tmux"]
+    socket = os.environ.get("SHELLBASE_TMUX_SOCKET", "").strip()
+    if socket:
+        argv += ["-L", socket]
+    conf = os.environ.get("SHELLBASE_TMUX_CONF", "").strip()
+    if conf:
+        argv += ["-f", conf]
+    return argv + list(args)
+
+
 class ApiError(Exception):
     def __init__(self, status: int, error: str, message: str = ""):
         self.status = status

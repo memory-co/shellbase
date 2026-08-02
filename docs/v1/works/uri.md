@@ -25,14 +25,14 @@
 
 关键设计：**前端不维护任何终端 scheme 名单**。`bash://`、`claude://`、`vim://`、注册表别名……在前端眼里都是"未知"，一律原样转发给 terminals API，由后端完成 scheme → 命令的适配与合法性裁决（§3.1，错误码见 api/terminals.md）。好处是新增 CLI、加别名、改注册表都不需要前端发版。
 
-https 类装载的是浏览器应用页（design.md §3.4：内层 iframe，地址栏统一在面板控制条的 URL bar），内层目标由 host 决定：外链直连、localhost 走 nginx 通配代理。
+https 类装载的是浏览器应用页（design.md §3.4：内层 iframe，地址栏统一在面板控制条的 URL bar），内层目标由 host 决定：外链直连、localhost 走网关通配代理。
 
 ## 3. Scheme 一览
 
 | URI 示例 | 含义 | 解析结果 |
 |----------|------|----------|
 | `https://www.example.com/docs` | 外部网页 | 浏览器应用打开，内层 iframe 直连该地址（受目标站 `X-Frame-Options` 限制，被拒时提示新窗口打开） |
-| `https://localhost:5173/` | 容器/本机上的 web 服务 | 浏览器应用打开，内层经 nginx 通配代理 `/proxy/5173/` 访问——外部无需映射该端口，且同源、无嵌入限制 |
+| `https://localhost:5173/` | 容器/本机上的 web 服务 | 浏览器应用打开，内层经网关通配代理 `/proxy/5173/` 访问——外部无需映射该端口，且同源、无嵌入限制 |
 | `file:///workspace/src` | 本地目录 | 文件浏览器应用定位到该目录（文件树） |
 | `file:///workspace/src/main.py` | 本地文件 | 文件浏览器应用直接打开该文件（编辑器） |
 | `bash:///workspace/proj` | 在该目录启动 bash 终端 | 终端会话，state id 派生自 URI → `302 /tty/?arg=<id>` |

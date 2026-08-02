@@ -39,7 +39,7 @@
 
 ## POST /api/files/upload
 
-`multipart/form-data`：`path`（目标目录）+ `files[]`。单请求上限 1GB（nginx `client_max_body_size` 同步）。同名文件直接覆盖。成功 `201 {"uploaded": ["a.txt", ...]}`。
+`multipart/form-data`：`path`（目标目录）+ `files[]`。单请求上限 1GB（网关按 `Content-Length` 卡，超限 `413`）。同名文件直接覆盖。成功 `201 {"uploaded": ["a.txt", ...]}`。
 
 ## GET /api/files/download?path=
 

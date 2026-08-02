@@ -217,7 +217,18 @@ async def watch(ws: WebSocket, path: str | None = None):
             with contextlib.suppress(Exception):
                 await ws.send_text(json.dumps({"type": "ping"}))
 
+    async def until_disconnect():
+        """客户端断开只有靠读才能感知：不盯着它，awatch 会一直转下去，
+        ASGI 任务永不返回，进程也就关不掉（graceful shutdown 会一直等）。"""
+        with contextlib.suppress(Exception):
+            while True:
+                msg = await ws.receive()
+                if msg.get("type") == "websocket.disconnect":
+                    break
+        stop.set()
+
     ping_task = asyncio.create_task(pinger())
+    disconnect_task = asyncio.create_task(until_disconnect())
     root = WORKSPACE.resolve()
     try:
         async for changes in awatch(d, stop_event=stop, step=200):
@@ -237,3 +248,4 @@ async def watch(ws: WebSocket, path: str | None = None):
     finally:
         stop.set()
         ping_task.cancel()
+        disconnect_task.cancel()
