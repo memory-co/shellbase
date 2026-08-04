@@ -25,7 +25,7 @@ from starlette.websockets import WebSocketDisconnect
 from websockets.asyncio.client import connect as ws_connect
 from websockets.exceptions import WebSocketException
 
-from .auth import COOKIE
+from .auth import cookie_name
 
 # 前端静态产物：Docker 用 COPY 落到镜像里，pip 用随 wheel 分发的 _assets/web
 WEB_ROOT = Path(
@@ -73,8 +73,10 @@ def _supplied_token(scope: Scope) -> str:
             jar.load(raw)
         except Exception:  # 坏 cookie 不该 500，按未携带处理
             jar = SimpleCookie()
-        if COOKIE in jar:
-            return jar[COOKIE].value
+        # 名字按端口区分：同机多实例的 cookie 才不会互相覆盖（auth.cookie_name）
+        name = cookie_name(_header(scope, b"host"), scope.get("scheme", "http"))
+        if name in jar:
+            return jar[name].value
     authz = _header(scope, b"authorization")
     if authz.lower().startswith("bearer "):
         return authz[7:].strip()

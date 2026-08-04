@@ -2,7 +2,9 @@
 
 设计背景：[works/design.md](../works/design.md) §3.1——应用层网关方案，`AuthGate` 中间件是校验的真身。
 
-Cookie：`shellbase_token`，`HttpOnly; SameSite=Strict; Path=/`（HTTPS 部署时加 `Secure`），值即访问令牌本身，有效期为会话级（不设 Max-Age，关浏览器即失）。
+Cookie：`shellbase_token_<端口>`，`HttpOnly; SameSite=Strict; Path=/`（HTTPS 部署时加 `Secure`），值即访问令牌本身，有效期为会话级（不设 Max-Age，关浏览器即失）。
+
+名字里的端口取自请求的 `Host` 头（缺省时按 scheme 兜底成 443/80）。**cookie 的作用域只认域名、不认端口**，同一台机器上两份实例若共用一个 cookie 名，谁后登录谁把对方顶下线；带上端口后浏览器才能同时持有多份登录态（works/design.md §5，tests/multi_instance）。
 
 ## POST /api/auth/login
 
@@ -15,14 +17,14 @@ Cookie：`shellbase_token`，`HttpOnly; SameSite=Strict; Path=/`（HTTPS 部署�
 ```
 
 - 与 `SHELLBASE_TOKEN` **常量时间比较**（`secrets.compare_digest`）；
-- 成功：`204`，`Set-Cookie: shellbase_token=...`；
+- 成功：`204`，`Set-Cookie: shellbase_token_<端口>=...`；
 - 失败：`401 {"error": "bad_token", "message": "invalid token"}`。
 
 ## GET /api/auth/verify
 
 **探测端点**：网关自身在中间件里校验令牌，不再发子请求；此端点保留给前端/外部探测，读取请求的 Cookie 或 `Authorization` 头：
 
-- 校验顺序：Cookie `shellbase_token` → `Authorization: Bearer <token>`（供脚本/程序化调用 API）；
+- 校验顺序：Cookie `shellbase_token_<端口>` → `Authorization: Bearer <token>`（供脚本/程序化调用 API）；
 - 通过：`204`；不通过：`401`。网关对 `/api/`、`/tty/`、`/proxy/` 下的未认证请求返回 401，页面路由则 302 跳转 `/login`。
 
 ## POST /api/auth/logout

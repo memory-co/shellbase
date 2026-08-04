@@ -3,7 +3,7 @@
 - ``client`` (fixture) —— 带令牌的 in-process HTTP client，直连 ASGI 应用，不开端口
 - ``anon`` (fixture) —— 同上但不带令牌，用来验门禁
 - ``FakeUpstream`` —— 只说最小 HTTP/1.1 的假上游，记录收到的请求原样，供反代场景用
-- ``TOKEN`` —— 测试用令牌
+- ``TOKEN`` / ``COOKIE`` —— 测试用令牌与它在本 client 上的 cookie 名
 
 环境变量必须在 import 应用之前定好：``state.py`` 在 import 期就把 workspace /
 state 目录算出来了，默认值是 ``/workspace``，跑测试的机器上不该去碰它。
@@ -32,7 +32,12 @@ os.environ["SHELLBASE_WEB_ROOT"] = str(_TMP / "web")
 for _d in ("workspace", "state/terminals", "state/windows", "web"):
     (_TMP / _d).mkdir(parents=True, exist_ok=True)
 
+from shellbase.auth import cookie_name  # noqa: E402
 from shellbase.main import app  # noqa: E402
+
+# 名字随实例端口变（auth.cookie_name）；这里的 base_url 没写端口，按 http 兜底成 80。
+# 命名规则本身由 multi_instance 场景用字面量锁，这里只是跟着走。
+COOKIE = cookie_name("gateway", "http")
 
 
 def client_for(*, token: str | None = TOKEN) -> httpx.AsyncClient:
@@ -40,7 +45,7 @@ def client_for(*, token: str | None = TOKEN) -> httpx.AsyncClient:
     return httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
         base_url="http://gateway",
-        cookies={"shellbase_token": token} if token else None,
+        cookies={COOKIE: token} if token else None,
         follow_redirects=False,
         timeout=30,
     )
