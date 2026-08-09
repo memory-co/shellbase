@@ -7,6 +7,11 @@
 
 设计文档见 [docs/v1/works/](docs/v1/works/design.md)，接口定义见 [docs/v1/api/](docs/v1/api/README.md)。
 
+画布里每个块背后是一个独立组件（[tmuxd](https://github.com/memory-co/tmuxd) 终端、[webmuxd](https://github.com/memory-co/webmuxd) 浏览器），它们共同遵循的规范定在这里：
+
+- [docs/v1/new-interface.md](docs/v1/new-interface.md) —— **为什么**是这个形状：HTTP 上的一扇窗 + 一个能控它的把手
+- [docs/v1/muxd-spec.md](docs/v1/muxd-spec.md) —— **算不算**一个 `*muxd` 组件：13 条必须、6 条应该、一致性检查清单
+
 ## 安装
 
 两种方式跑的是同一套东西：单端口的 FastAPI 网关（静态托管 + 鉴权 + 反代）加一个 ttyd/tmux
