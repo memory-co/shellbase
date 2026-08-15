@@ -1,9 +1,11 @@
 # `claude://` · 在一个目录上开工
 
 ```
-claude:///workspace/proj              终端形态（默认）
-claude:///workspace/proj?as=chat      同一份现场，对话形态
+claude:///workspace/proj      在这个目录上开工
 ```
+
+形态不写在 URI 里（[protocol.md §4](../protocol.md)）：默认起终端，
+块里的切换入口由本 plugin 自己提供，切过之后记在块状态里。
 
 这是**最能说明 provider 分层价值**的一个：它本来就是终端程序，终端形态零成本；
 多一个对话形态，只多写一条切轮次的规则。

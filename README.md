@@ -11,7 +11,7 @@ v2 的方向是把画布里每个块背后换成一个独立组件（[tmuxd](htt
 
 - [docs/v2/works/new-interface.md](docs/v2/works/new-interface.md) —— **为什么**是这个形状：HTTP 上的一扇窗 + 一个能控它的把手
 - [docs/v2/works/muxd-spec.md](docs/v2/works/muxd-spec.md) —— **算不算**一个 `*muxd` 组件：13 条必须、6 条应该、一致性检查清单
-- [docs/v2/works/protocol.md](docs/v2/works/protocol.md) —— 协议 / provider / plugin 三层：块的身份是「协议 + 路径」，形态可切换
+- [docs/v2/works/protocol.md](docs/v2/works/protocol.md) —— 协议 / provider / plugin 三层：块的身份是「协议 + 路径」，形态由 plugin 定、不进 URI
 - [docs/v2/works/plugins/](docs/v2/works/plugins/README.md) —— 一个协议一篇：`claude://` `vim://` `https://` `file://` `bash://`
 
 ## 安装
