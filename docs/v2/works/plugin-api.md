@@ -22,28 +22,30 @@ class Claude(Plugin):
     def mount(self, ctx):
         if not which("claude"):
             raise Missing("claude", install="npm i -g @anthropic-ai/claude-code")
-        sess = ctx.tmuxd.session(         # id 幂等：已存在就是取回来（M4）
-            id=self.session_id(ctx.uri), cwd=str(ctx.path), cmd="claude", env=ctx.env,
+        sid = self.session_id(ctx.uri)
+        term = ctx.providers.terminal.get(     # 找 provider 要，不碰 tmuxd（M4 id 幂等）
+            TerminalSpec(id=sid, cwd=str(ctx.path), cmd="claude", env=ctx.env),
         )
         if ctx.form == "chat":
-            return Chat(send=sess.send, read=sess.capture, split=split_on_prompt)
-        return Terminal(url=sess.window_url)   # 组件报出的窗，怎么摆是画布的事（M11）
+            return ctx.providers.chat.get(
+                ChatSpec(id=sid, source=term, split=split_on_prompt),
+            )
+        return term
 ```
 
-**两种形态共用同一个 `sess`**，所以它们是同一份现场；第二种形态多写的全部代码，
+**两种形态共用同一个 `term`**，所以它们是同一份现场；第二种形态多写的全部代码，
 就是那个 `split_on_prompt`（切不出轮次就返回 `None`，画布降级为整屏文本，不猜边界）。
 
-`mount()` 只能返回五种之一，它们就是 plugin 与画布之间的全部接口面：
-`Terminal(url)` / `Browser(url)` / `Files(root)` / `Chat(send, read, split)` /
-`Custom(url)`。
+`mount()` 返回一个**实例**（[provider.md](provider.md)）。plugin 全程没有出现
+`tmuxd` 这个词——换掉终端组件时，这段代码一行不动。
 
 `ctx` 是画布递进来的只读上下文：`uri`、`path`（运行时已 `parse` 好）、
-`form`（块状态里的当前形态）、`tmuxd` / `webmuxd` 把手、`env`（平台注入的环境变量）。
+`form`（块状态里的当前形态）、`providers`（五个 provider）、`env`（平台注入的环境变量）。
 
 外部 plugin 走 entry point 注册（`shellbase.plugins`）——**plugin 是代码，声明也在代码里**，
 不像 v1 那样往环境变量里塞一段 JSON。
 
-## 写这段代码逼出的三处修正
+## 写这段代码逼出的四处修正
 
 设计文档在这三处是自欺的，已回改 [protocol.md](protocol.md)：
 
@@ -53,4 +55,7 @@ class Claude(Plugin):
    由画布渲染，**但形态清单与默认值来自 plugin，用户选完存进块状态、下次原样传回
    `ctx.form`**。想完全自己控制界面的，用 `Custom` 那扇窗；
 3. **`parse()` 原本会被调两次**（校验一次、`mount` 里一次）。改成运行时先 parse、
-   结果放进 `ctx.path`。
+   结果放进 `ctx.path`；
+4. **plugin 原本直接调 `ctx.tmuxd`**——那样 provider 就没省下任何开发量，换组件时
+   每个 plugin 都得改。改成向 provider 要实例，**调 muxd 是 provider 的事**
+   （[provider.md](provider.md)）。

@@ -72,13 +72,16 @@ plugin 要声明的东西不多，但每一条都必须显式：
 
 每种 provider 向 plugin 要的东西，就是它全部的接线面：
 
-| provider | plugin 要给出 |
+| provider | plugin 递一份 spec |
 | --- | --- |
-| 终端 | 一个 tmuxd session（把手）；窗由组件报出 URL |
-| 网页浏览器 | 一个 URL；窗由 webmuxd 报出 |
-| 对话 | 一个「发一段 / 读一段」的把手，外加把字符流切成轮次的规则 |
-| 文件浏览器 | 一个根路径 |
-| 自定义 | 一个 URL（plugin 自己起的窗，自己负责活着） |
+| 终端 | `TerminalSpec(id, cwd, cmd, env)` |
+| 网页浏览器 | `BrowserSpec(id, url)` |
+| 对话 | `ChatSpec(id, source, split)`——`source` 是另一个已存在的实例 |
+| 文件浏览器 | `FilesSpec(id, root)` |
+| 自定义 | `CustomSpec(id, url)`（plugin 自己起的窗，自己负责活着） |
+
+**plugin 不碰 muxd**——递 spec，provider 去调。换掉 tmuxd 时 plugin 一行不改。
+实例、粒度与回收见 [provider.md](provider.md)。
 
 **provider 存在的全部意义就在这张表**：它把「怎么呈现、怎么收 input」这部分做成公共的，
 plugin 只需交出那一两样东西。以 `claude://` 为例——它本来就是个终端程序，终端形态零成本；
@@ -133,9 +136,9 @@ plugin 只需交出那一两样东西。以 `claude://` 为例——它本来就
 所以 v1 网关那套反代在 v2 里继续存在，只是它反代的对象从「我们自己拉起的 ttyd」
 变成「组件报出来的窗」。
 
-provider 与组件是**多对多**：终端 provider 今天由 tmuxd 支撑，换成别的组件时 provider
-的呈现契约不变；文件浏览器 provider 背后干脆没有组件，就是 shellbase 自己的文件 API。
-**provider 是呈现契约，组件是能力来源，两者不必一一对应。**
+**provider 是唯一调用组件的那一层**：终端 provider 调 tmuxd、浏览器 provider 调 webmuxd、
+文件浏览器 provider 背后干脆没有组件（就是平台自己的文件 API）、对话 provider 包在
+另一个实例的把手上。plugin 与画布都不直接碰组件。
 
 组件不可用时按 [M13](muxd-spec.md) 办：**说不可用，不静默换一个 provider**。
 悄悄从对话降级成终端，用户会以为自己看到的是同一个东西。
