@@ -10,7 +10,7 @@ https://localhost:5173/         本机上跑着的服务
 ## path
 
 **网址本身**，不是文件系统路径——这是「path 的语义归 plugin 解释」
-（[protocol.md §1](../../protocol.md)）最直白的一个例子。
+（[protocol.md §1](../protocol.md)）最直白的一个例子。
 
 ## 形态
 
@@ -20,7 +20,7 @@ https://localhost:5173/         本机上跑着的服务
 | 情况 | 承载 |
 | --- | --- |
 | 默认 | 前端 iframe 直接装载 |
-| host 是 `localhost` / `127.0.0.1` | 经网关的 `/proxy/<port>/` 反代（[v1 uri §3](../../../../v1/works/uri.md)） |
+| host 是 `localhost` / `127.0.0.1` | 经网关的 `/proxy/<port>/` 反代（[v1 uri §3](../../../v1/works/uri.md)） |
 | 页面拒绝被嵌入，或需要程序驱动 | webmuxd 的窗 |
 
 **为什么 localhost 必须走代理**：浏览器里的 `localhost` 指的是用户自己的设备，

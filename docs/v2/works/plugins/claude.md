@@ -31,7 +31,7 @@ claude 的输出里可能出现形似提示符的内容。所以：
 - 切不出轮次时**降级为整屏文本**，并在那一轮上标一条 note，说明「没能切分」；
 - **不猜**——不做「看起来像回答就当成一轮」这类推断。宁可给一整块，也不给一个错的边界。
 
-轮次历史来自 tmux 的 scrollback（[M10](../../muxd-spec.md) 日志即 scrollback），
+轮次历史来自 tmux 的 scrollback（[M10](../muxd-spec.md) 日志即 scrollback），
 plugin 自己不再存一份——两份历史迟早对不上。
 
 ## 会话
@@ -41,9 +41,9 @@ plugin 自己不再存一份——两份历史迟早对不上。
 
 ## 依赖与凭据
 
-- `claude` 要在 PATH 里。不在就报出装它的那条命令（[M12](../../muxd-spec.md)），
+- `claude` 要在 PATH 里。不在就报出装它的那条命令（[M12](../muxd-spec.md)），
   而不是「命令未找到」；
-- `ANTHROPIC_API_KEY` 由平台的全局环境变量机制注入（[v1 env](../../../../v1/works/env.md)），
+- `ANTHROPIC_API_KEY` 由平台的全局环境变量机制注入（[v1 env](../../../v1/works/env.md)），
   plugin 不自己管凭据。
 
 ## 做不到的
