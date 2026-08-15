@@ -9,8 +9,8 @@
 
 v2 的方向是把画布里每个块背后换成一个独立组件（[tmuxd](https://github.com/memory-co/tmuxd) 终端、[webmuxd](https://github.com/memory-co/webmuxd) 浏览器），shellbase 从「自己实现」变成「组织展示」。它们共同遵循的规范是 v2 设计的根基：
 
-- [docs/v2/new-interface.md](docs/v2/new-interface.md) —— **为什么**是这个形状：HTTP 上的一扇窗 + 一个能控它的把手
-- [docs/v2/muxd-spec.md](docs/v2/muxd-spec.md) —— **算不算**一个 `*muxd` 组件：13 条必须、6 条应该、一致性检查清单
+- [docs/v2/works/new-interface.md](docs/v2/works/new-interface.md) —— **为什么**是这个形状：HTTP 上的一扇窗 + 一个能控它的把手
+- [docs/v2/works/muxd-spec.md](docs/v2/works/muxd-spec.md) —— **算不算**一个 `*muxd` 组件：13 条必须、6 条应该、一致性检查清单
 
 ## 安装
 
