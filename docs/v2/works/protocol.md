@@ -66,7 +66,7 @@ plugin 要声明的东西不多，但每一条都必须显式：
 | `parse(path)` | 怎么解释和校验 path，失败要说清哪一条不满足 |
 | `providers` | 支持哪几种形态，以及每种怎么接（见下表） |
 | `default_provider` | 用户没指定时用哪个 |
-| `session_id(uri)` | 同一个 URI 是不是同一个会话——对齐 [M4 id 幂等](muxd-spec.md) |
+| `session_id(uri)` | 同一个 URI 是不是同一个会话——对齐 [M4 id 幂等](muxd-spec.md)；返回 `None` 表示这个协议**没有活的会话**（如 `file://`） |
 
 每种 provider 向 plugin 要的东西，就是它全部的接线面：
 
@@ -99,6 +99,10 @@ plugin 只需交出那一两样东西。以 `claude://` 为例——它本来就
 这正是 provider 是视图而非身份的直接后果。也因此，**两个块可以用两种形态看同一份现场**：
 终端块里滚动的输出，和对话块里的最后一轮，是同一个东西的两种画法
 （tmux 的多客户端镜像本来就成立，见 [v1 collab](../../v1/works/collab.md)）。
+
+会话有三种形态：**每块一个**（默认，如 `bash://`）、**同 path 共享**（如 `vim://`——
+两个 vim 编辑同一文件会打架）、**没有会话**（如 `file://`——背后没有长驻进程）。
+各协议的选择与理由见 [plugins/](plugins/)。
 
 **开新块默认是新会话。** v1 的会话身份含 window 与 block 号（[v1 uri](../../v1/works/uri.md)），
 即同一个 `scheme://path` 在两个块里是两个独立终端——这个默认保留，因为「我想在同一个目录
@@ -146,7 +150,11 @@ v1 的 `?window=&block=` 身份参数原样保留，`?as=` 是新增的第三个
 - **不做多用户与权限模型**，沿用 [muxd-spec §3](muxd-spec.md)；
 - **不做 provider 的可视化编排。** 怎么摆、怎么分割是画布的事，不是协议层的事。
 
-## 8. 走一遍：`claude://` 的两种形态
+## 8. 各协议的实现
+
+每个协议一个目录，声明与判断写在各自的 README 里：[plugins/](plugins/)。
+
+## 9. 走一遍：`claude://` 的两种形态
 
 ```
 claude:///workspace/proj                 → 默认形态：终端
