@@ -56,7 +56,7 @@ class Unavailable:
 ```python
 providers = Providers(
     terminal=TerminalProvider(tmuxd=Tmuxd(port=12345)),
-    browser=BrowserProvider(webmuxd=Webmuxd(), session_port=7900, idle_timeout=1800),
+    browser=BrowserProvider(webmuxd=Webmuxd(), ports=range(7900, 7910), idle_timeout=1800),
     chat=ChatProvider(),
     files=FilesProvider(root=WORKSPACE),
     custom=CustomProvider(),
@@ -68,7 +68,7 @@ plugin 拿到的 `ctx.providers` 就是它，五个字段，只读。
 | provider | init 要什么 | 为什么 |
 | --- | --- | --- |
 | 终端 | `tmuxd` 把手 | 端口是部署决定的 |
-| 网页浏览器 | `webmuxd` 把手、共享 session 的端口与闲置超时 | 见 §4 的两级粒度 |
+| 网页浏览器 | `webmuxd` 把手、端口段、闲置超时 | 一块一个 session，端口段由部署给（[browser](providers/browser.md)） |
 | 对话 | 无 | 它不依赖任何组件，包在别的实例上（§5） |
 | 文件浏览器 | workspace 根 | 越界一律拒绝，与 v1 同一条线 |
 | 自定义 | 无 | 窗由 plugin 自己起、自己负责活着 |
@@ -85,7 +85,7 @@ plugin 拿到的 `ctx.providers` 就是它，五个字段，只读。
 | provider | 一个实例是什么 | 背后调谁 | 产出 |
 | --- | --- | --- | --- |
 | **终端** | 一个 tmux session | tmuxd | 窗（ttyd URL）+ 把手（send / capture） |
-| **网页浏览器** | 一个 tab | webmuxd | 窗（VNC URL）+ 把手（CDP） |
+| **网页浏览器** | 一个 webmuxd session | webmuxd | 窗（VNC URL）+ 把手（CDP） |
 | **对话** | 一个 source 实例上的轮次视图 | **不调 muxd**，见 §5 | 无窗，把手即 source 的把手 |
 | **文件浏览器** | 一个根路径下的浏览现场 | 平台自己的文件 API | 无窗，画布直接渲染 |
 | **自定义** | plugin 自己起的一扇窗 | **不调**，plugin 自己负责 | 窗（plugin 报的 URL） |
@@ -94,21 +94,20 @@ plugin 拿到的 `ctx.providers` 就是它，五个字段，只读。
 
 ```python
 TerminalSpec(id, cwd, cmd, env)      BrowserSpec(id, url)
-ChatSpec(id, source, split)          FilesSpec(id, root)      CustomSpec(id, url)
+ChatSpec(id, source, split)          FilesSpec(id, root)      CustomSpec(id, url, close=None)
 ```
 
 ### 实例粒度不是一刀切
 
-**终端每块一个，浏览器不是。** 一个 tmux session 极便宜，所以「同一个目录再开一个
-shell」随手就来；而 webmuxd 的一个 session 是一整个桌面镜像（4 GB 级），
-每块起一个不可接受。
+**终端每块一个，浏览器也每块一个，但理由相反。** 终端便宜（一个 tmux session 就是
+一个进程），随手开就是；浏览器贵（一个 session 是 4 GB 级桌面镜像），但**不能为了省
+资源而共享**——webmuxd 的窗是 VNC，传的是画面，多个块嵌同一个 VNC URL 会看到完全
+一样的画面、互相抢 tab。**共享在视觉上不成立**，详见 [browser](providers/browser.md)。
 
-所以**浏览器 provider 内部分两级**：一个按需起的共享 webmuxd session，
-每个块在里面占一个 tab。对 plugin 和画布来说，实例仍然只有一种粒度（一个 tab），
-**共享那一级是 provider 的内务**——它 init 时多要两个参数，正是为了管这件事。
+省资源只能从另一头下手：**保留期按成本定**（终端天级、浏览器分钟级），以及端口段
+用完就报错、不自动扩。
 
-这就是「一个 provider 能搞出一个或多个实例」的实际含义：实例数由使用决定，
-而它们底下压着几个 muxd session，是 provider 自己的账。
+每种形态各自的边界、生命周期与做不到的事，一种一篇：[providers/](providers/)。
 
 ## 5. 对话 provider 没有自己的 muxd
 

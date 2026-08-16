@@ -13,6 +13,7 @@ v2 的方向是把画布里每个块背后换成一个独立组件（[tmuxd](htt
 - [docs/v2/works/muxd-spec.md](docs/v2/works/muxd-spec.md) —— **算不算**一个 `*muxd` 组件：13 条必须、6 条应该、一致性检查清单
 - [docs/v2/works/protocol.md](docs/v2/works/protocol.md) —— 协议 / provider / plugin 三层：块的身份是「协议 + 路径」，形态由 plugin 定、不进 URI
 - [docs/v2/works/provider.md](docs/v2/works/provider.md) —— provider 那层：实例、粒度、回收，以及"唯一调 muxd 的地方"
+- [docs/v2/works/providers/](docs/v2/works/providers/README.md) —— 一种形态一篇：终端 / 网页浏览器 / 对话 / 文件浏览器 / 自定义
 - [docs/v2/works/plugin-api.md](docs/v2/works/plugin-api.md) —— plugin 长什么样：一段 30 行的 `claude://` 实现
 - [docs/v2/works/plugins/](docs/v2/works/plugins/README.md) —— 一个协议一篇：`claude://` `vim://` `https://` `file://` `bash://`
 

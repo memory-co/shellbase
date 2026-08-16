@@ -78,7 +78,7 @@ plugin 要声明的东西不多，但每一条都必须显式：
 | 网页浏览器 | `BrowserSpec(id, url)` |
 | 对话 | `ChatSpec(id, source, split)`——`source` 是另一个已存在的实例 |
 | 文件浏览器 | `FilesSpec(id, root)` |
-| 自定义 | `CustomSpec(id, url)`（plugin 自己起的窗，自己负责活着） |
+| 自定义 | `CustomSpec(id, url, close=None)`（plugin 自己起的窗，自己负责活着） |
 
 **plugin 不碰 muxd**——递 spec，provider 去调。换掉 tmuxd 时 plugin 一行不改。
 实例、粒度与回收见 [provider.md](provider.md)。
